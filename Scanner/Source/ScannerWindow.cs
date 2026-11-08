@@ -10,7 +10,7 @@ using Avalonia.Threading;
 
 namespace WrongWay;
 
-sealed class ScannerWindow : Window
+sealed partial class ScannerWindow : Window
 {
     private static readonly IBrush BackgroundBrush = DeskUi.Frame;
     private static readonly IBrush Muted = DeskUi.Muted;
@@ -24,13 +24,10 @@ sealed class ScannerWindow : Window
     private readonly TextBlock clock = new();
     private readonly TextBox filter = new() { Watermark = "Find a channel or PID" };
     private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
-    private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles, SelectedIndex = 0, Width = 152 };
+    private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
     private readonly Slider slider = new() { Minimum = 0, Maximum = 1, IsEnabled = false };
     private readonly TraceChart chart = new() { MinHeight = 170 };
-    private readonly ScanGauge rpmGauge = new("Engine speed", "rpm", 8000, TraceChart.SeriesBrushes[0]);
-    private readonly ScanGauge mapGauge = new("Manifold pressure", "kPa", 120, TraceChart.SeriesBrushes[1]);
-    private readonly ScanGauge throttleGauge = new("Throttle position", "%", 100, TraceChart.SeriesBrushes[2]);
     private readonly ContentControl graph = new();
     private readonly TabControl instrumentTabs = new();
     private readonly TextBlock channelCount = DeskUi.Label("0 channels", 11, DeskUi.Muted);
@@ -106,6 +103,11 @@ sealed class ScannerWindow : Window
         }, DeskUi.Table);
         var gaugeMenu = new MenuItem { Header = "Gauges" };
         gaugeMenu.Click += (_, _) => instrumentTabs.SelectedIndex = 0;
+        var editGauges = Button("Edit gauges", EditGauges);
+        var editGraph = Button("Edit graph", EditGraph);
+        var editTraces = Button("Edit traces", EditTraces);
+        var editChannels = Button("Edit display channels", EditDisplayChannels);
+        var editLive = Button("Edit live channels", EditLiveChannels);
         var menu = new Menu
         {
             ItemsSource = new[]
@@ -114,15 +116,21 @@ sealed class ScannerWindow : Window
                     DeskUi.Action("Tune BIN", tuneButton)),
                 DeskUi.Menu("_Scan", DeskUi.Action("Record", recordButton), DeskUi.Action("Stop", stopButton),
                     DeskUi.Action("Read DTCs", codesButton), DeskUi.Action("Find ports", refreshPorts)),
-                DeskUi.Menu("_View", gaugeMenu, DeskUi.Action("RPM × MAP graph", histogramButton),
+                DeskUi.Menu("_View", gaugeMenu, DeskUi.Action("Histogram graph", histogramButton),
                     DeskUi.Action("Fit time chart", zoomOut)),
+                DeskUi.Menu("_Layout", DeskUi.Action("Gauges…", editGauges), DeskUi.Action("Histogram graph…", editGraph),
+                    DeskUi.Action("Time chart…", editTraces), DeskUi.Action("Display channels…", editChannels),
+                    DeskUi.Action("Live channels…", editLive),
+                    DeskUi.Action("Save layout as…", Button("Save layout as", SaveLayout)),
+                    DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
+                    DeskUi.Action("Reset to defaults…", Button("Reset layout", ResetLayout))),
                 DeskUi.Menu("_Tools", DeskUi.Action("Wideband AFR", widebandButton), pcmToolsMenu)
             }
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,
             histogramButton, widebandButton, tuneButton);
         var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton,
-            DeskUi.Label("Profile", 12, Muted), profile);
+            DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
         var columns = new DockPanel { LastChildFill = true };
         var valueTitle = DeskUi.Label("Value", 11, Muted);
@@ -130,21 +138,22 @@ sealed class ScannerWindow : Window
         columns.Children.Add(valueTitle);
         columns.Children.Add(DeskUi.Label("Name", 11, Muted));
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
-        Put(sidebar, DeskUi.Strip(DeskUi.Section("Channels"), DeskUi.Header), 0);
+        var channelEdit = Button("Edit", EditDisplayChannels);
+        Put(sidebar, DeskUi.Strip(Header("Channels", channelEdit), DeskUi.Header), 0);
+        sidebar.ContextMenu = new ContextMenu { Items = { DeskUi.Action("Edit display channels…", editChannels), DeskUi.Action("Edit live channels…", editLive) } };
         filter.Margin = new Thickness(5);
         Put(sidebar, filter, 1);
         Put(sidebar, DeskUi.Strip(columns), 2);
         Put(sidebar, new ScrollViewer { Content = channelList }, 3);
         Put(sidebar, DeskUi.Strip(channelCount), 4);
 
-        var gauges = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*,*"), MinHeight = 92 };
-        Put(gauges, rpmGauge, 0);
-        Put(gauges, mapGauge, 0, 1);
-        Put(gauges, throttleGauge, 0, 2);
+        var gaugePane = PanelWithEditor(gaugeGrid, editGauges, "Edit gauges…");
+        gaugeGrid.Background = DeskUi.ChartBackground;
+        var graphPane = PanelWithEditor(graph, editGraph, "Edit graph…");
         instrumentTabs.ItemsSource = new[]
         {
-            new TabItem { Header = DeskUi.Section("Gauges"), MinHeight = 30, Padding = new Thickness(9, 3), Content = new Border { Background = DeskUi.ChartBackground, Child = gauges } },
-            new TabItem { Header = DeskUi.Section("Graph"), MinHeight = 30, Padding = new Thickness(9, 3), Content = graph }
+            new TabItem { Header = DeskUi.Section("Gauges"), MinHeight = 30, Padding = new Thickness(9, 3), Content = gaugePane },
+            new TabItem { Header = DeskUi.Section("Graph"), MinHeight = 30, Padding = new Thickness(9, 3), Content = graphPane }
         };
         instrumentTabs.SelectedIndex = 0;
         instrumentTabs.SelectionChanged += (_, args) =>
@@ -153,10 +162,8 @@ sealed class ScannerWindow : Window
                 RefreshHistogram();
         };
 
-        var chartHeader = new DockPanel { LastChildFill = true };
-        DockPanel.SetDock(zoomOut, Dock.Right);
-        chartHeader.Children.Add(zoomOut);
-        chartHeader.Children.Add(DeskUi.Section("Chart vs. Time"));
+        var chartHeader = Header("Chart vs. Time", Row(editTraces, zoomOut));
+        chart.ContextMenu = new ContextMenu { Items = { DeskUi.Action("Edit traces…", editTraces) } };
         var playbackRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 10 };
         Put(playbackRow, playButton, 0, 0);
         Put(playbackRow, slider, 0, 1);
@@ -196,6 +203,14 @@ sealed class ScannerWindow : Window
         Put(layout, main, 4);
         Put(layout, DeskUi.Strip(status), 5);
         Content = layout;
+        if (File.Exists(ScannerLayout.DefaultPath))
+        {
+            try { scannerLayout = ScannerLayout.Load(ScannerLayout.DefaultPath); }
+            catch (Exception ex) { SetStatus("Could not load saved scanner layout. " + ex.Message, true); }
+        }
+        if (scannerLayout.LiveChannels is not null)
+            profile.SelectedItem = LiveScanner.Custom;
+        RebuildGauges();
 
         timer.Tick += (_, _) => Tick();
         timer.Start();
@@ -318,19 +333,9 @@ sealed class ScannerWindow : Window
         sessionText.Text = next.ScannerVersion is { } version
             ? $"{next.Name}   ·   VCM Scanner {version}"
             : next.Name;
-        active.Clear();
-        foreach (var (pid, name) in new[] { (12, "RPM"), (11, "Manifold"), (17, "Throttle"), (2630, "Knock Retard") })
-        {
-            var item = next.Find(pid, name);
-            if (pid == 12)
-                item ??= next.Find(pid, "Engine Speed");
-            if (pid == 11)
-                item ??= next.Find(pid, "MAP");
-            if (item is not null && item.Readings.Any(r => r.Number is not null))
-                active.Add(item);
-        }
-        if (active.Count == 0)
-            active.AddRange(next.Channels.Where(c => c.Readings.Any(r => r.Number is not null)).Take(4));
+        ApplyChannelDisplay();
+        SelectTraces();
+        RebuildGauges();
         chart.Origin = next.Start;
         Seek(next.Start);
         FitView();
@@ -344,6 +349,35 @@ sealed class ScannerWindow : Window
         RefreshButtons();
     }
 
+    private void SelectTraces()
+    {
+        active.Clear();
+        traceStyles.Clear();
+        if (log is not { } next)
+            return;
+        if (scannerLayout.Traces is { } traces)
+        {
+            foreach (var trace in traces)
+            {
+                if (trace.Source.Resolve(next) is { } channel && traceStyles.TryAdd(channel, trace))
+                    active.Add(channel);
+            }
+            return;
+        }
+        foreach (var (pid, name) in new[] { (12, "RPM"), (11, "Manifold"), (17, "Throttle"), (2630, "Knock Retard") })
+        {
+            var item = next.Find(pid, name);
+            if (pid == 12)
+                item ??= next.Find(pid, "Engine Speed");
+            if (pid == 11)
+                item ??= next.Find(pid, "MAP");
+            if (item is not null && item.Readings.Any(r => r.Number is not null))
+                active.Add(item);
+        }
+        if (active.Count == 0)
+            active.AddRange(next.Channels.Where(c => c.Readings.Any(r => r.Number is not null)).Take(4));
+    }
+
     private void PopulateChannels()
     {
         channelList.Children.Clear();
@@ -354,7 +388,9 @@ sealed class ScannerWindow : Window
         string search = filter.Text?.Trim() ?? "";
         foreach (var channel in log.Channels)
         {
-            if (!channel.Label.Contains(search, StringComparison.OrdinalIgnoreCase) &&
+            if (channel.Display?.Hidden == true ||
+                !channel.DisplayLabel.Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                !channel.Label.Contains(search, StringComparison.OrdinalIgnoreCase) &&
                 !(channel.Pid?.ToString(CultureInfo.InvariantCulture).Contains(search) ?? false))
                 continue;
             var value = Text("—", 11, Muted);
@@ -366,30 +402,30 @@ sealed class ScannerWindow : Window
             {
                 Content = new TextBlock
                 {
-                    Text = channel.Name, TextTrimming = TextTrimming.CharacterEllipsis,
+                    Text = channel.DisplayName, TextTrimming = TextTrimming.CharacterEllipsis,
                     FontSize = 12
                 },
                 IsChecked = active.Contains(channel),
                 IsEnabled = channel.Readings.Any(r => r.Number is not null),
                 MinHeight = 24, Padding = new Thickness(4, 0, 0, 0)
             };
-            ToolTip.SetTip(name, channel.Label + (channel.Pid is { } pid ? $" · PID {pid}" : ""));
+            ToolTip.SetTip(name, channel.DisplayLabel + (channel.Pid is { } pid ? $" · PID {pid}" : ""));
             name.IsCheckedChanged += (_, _) =>
             {
+                var source = ChannelSource.From(log, channel);
+                var traces = CurrentTraces().Where(trace => trace.Source.Resolve(log) != channel).ToList();
                 if (name.IsChecked == true)
                 {
-                    if (active.Count >= 6)
+                    if (traces.Count >= 6)
                     {
-                        name.IsChecked = false;
                         SetStatus("Select up to six channels for the chart.");
+                        Dispatcher.UIThread.Post(PopulateChannels);
                         return;
                     }
-                    if (!active.Contains(channel))
-                        active.Add(channel);
+                    traces.Add(new TraceSetting(source, NextTraceColor(traces)));
                 }
-                else
-                    active.Remove(channel);
-                RefreshChart();
+                if (!ApplyLayout(scannerLayout with { Traces = traces.ToArray() }, "Time chart updated."))
+                    Dispatcher.UIThread.Post(PopulateChannels);
             };
             var row = new DockPanel { Children = { value, name } };
             channelList.Children.Add(new Border
@@ -459,6 +495,8 @@ sealed class ScannerWindow : Window
             chart.ViewStart = Math.Max(log.Start, log.End - 15_000);
             chart.ViewEnd = Math.Max(chart.ViewStart + 1000, log.End);
             RefreshChart();
+            if (instrumentTabs.SelectedIndex == 1)
+                UpdateHistogram();
             return;
         }
         if (!playback.IsRunning)
@@ -478,6 +516,7 @@ sealed class ScannerWindow : Window
     private void RefreshChart()
     {
         chart.Channels = active;
+        chart.TraceStyles = traceStyles;
         chart.CursorTime = cursor;
         chart.InvalidateVisual();
         if (log is null)
@@ -485,14 +524,13 @@ sealed class ScannerWindow : Window
         foreach (var (channel, element) in displayedValues)
         {
             var reading = channel.AsOf(cursor);
-            element.Text = reading?.Number is { } number
-                ? $"{number:0.##} {channel.Unit}".TrimEnd() : reading?.Text ?? "—";
+            element.Text = channel.DisplayNumber(reading) is { } number
+                ? $"{channel.FormatDisplay(number)} {channel.DisplayUnit}".TrimEnd() : reading?.Text ?? "—";
             int index = active.IndexOf(channel);
-            element.Foreground = index < 0 ? Muted : ChannelInks[index];
+            element.Foreground = index < 0 ? Muted : ChannelInks[traceStyles.GetValueOrDefault(channel)?.Color ?? index];
         }
-        UpdateGauge(rpmGauge, EngineSpeed(log));
-        UpdateGauge(mapGauge, ManifoldPressure(log));
-        UpdateGauge(throttleGauge, log.Find(17, "Throttle"));
+        foreach (var (gauge, channel) in gauges)
+            gauge.Update(channel, cursor);
         clock.Text = $"{(cursor - log.Start) / 1000d:0.000} s";
         playButton.Content = playback.IsRunning ? "Pause" : "Play";
         adjustingSlider = true;
@@ -500,13 +538,6 @@ sealed class ScannerWindow : Window
         slider.Value = Math.Max(0, cursor - log.Start);
         adjustingSlider = false;
     }
-
-    private static Channel? EngineSpeed(ScanLog log) => log.Find(12, "RPM") ?? log.Find(12, "Engine Speed");
-    private static Channel? ManifoldPressure(ScanLog log) =>
-        log.Find(11, "Manifold Absolute Pressure") ?? log.Find(11, "Manifold Pressure") ?? log.Find(11, "MAP");
-
-    private void UpdateGauge(ScanGauge gauge, Channel? channel) =>
-        gauge.Update(channel?.AsOf(cursor)?.Number, channel?.Unit ?? "");
 
     private async Task FindPort()
     {
@@ -569,7 +600,10 @@ sealed class ScannerWindow : Window
         details.Children.Add(Text("Adapter serial   " + inspection.Adapter.Serial, 13, Muted));
         details.Children.Add(Text($"OBD port voltage   {inspection.Adapter.Voltage:0.00} V", 13, DeskUi.Ink));
         if (inspection.Pcm is { } pcm)
+        {
+            liveOs = pcm.OsId;
             details.Children.Add(Text("PCM OS ID   " + pcm.OsId, 13, DeskUi.Ink));
+        }
         if (inspection.Pcm?.Vin is { } vin)
         {
             details.Children.Add(Text("VIN stored in PCM", 13, DeskUi.Ink));
@@ -604,9 +638,15 @@ sealed class ScannerWindow : Window
             return;
         var next = new ScanLog(Path.GetFileName(path));
         string selection = (string?)profile.SelectedItem ?? LiveScanner.Profiles[0];
+        var custom = selection == LiveScanner.Custom ? scannerLayout.LiveChannels : null;
+        if (selection == LiveScanner.Custom && custom is null)
+        {
+            SetStatus("Set up a custom profile in Edit live channels first.", true);
+            return;
+        }
         await RunHardware(async token =>
         {
-            await LiveScanner.Record(device, selection, path, PostStatus,
+            await LiveScanner.Record(device, selection, custom, path, PostStatus,
                 reading => Dispatcher.UIThread.Post(() => AppendLive(next, reading)), token);
         }, recording: true);
     }
@@ -619,7 +659,7 @@ sealed class ScannerWindow : Window
             for (int i = 0; i < reading.Columns.Length; i++)
             {
                 var column = reading.Columns[i];
-                next.Channels.Add(new Channel(i, null, column.Name, column.Unit));
+                next.Channels.Add(new Channel(i, column.Pid, column.Name, column.Unit));
             }
         }
         next.NoteFrame(reading.Time);
@@ -783,7 +823,19 @@ sealed class ScannerWindow : Window
             }
             current.Channels.Add(calculated);
             if (active.Count < 6)
-                active.Add(calculated);
+            {
+                if (scannerLayout.Traces is null)
+                    active.Add(calculated);
+                else if (!active.Contains(calculated) && !scannerLayout.Traces.Any(trace => trace.Source.Resolve(current) == calculated)
+                    && scannerLayout.Traces.Length < 6)
+                {
+                    var traces = scannerLayout.Traces.Append(new TraceSetting(ChannelSource.From(current, calculated),
+                        NextTraceColor(scannerLayout.Traces))).ToArray();
+                    ApplyLayout(scannerLayout with { Traces = traces }, "Added wideband trace.");
+                }
+            }
+            ApplyChannelDisplay();
+            RebuildGauges();
             filter.Text = "";
             PopulateChannels();
             SetStatus($"Added {name} using slope {scale:G} and offset {intercept:G}.");
@@ -805,97 +857,6 @@ sealed class ScannerWindow : Window
             RefreshHistogram();
         else
             instrumentTabs.SelectedIndex = 1;
-    }
-
-    private void RefreshHistogram()
-    {
-        void Empty(string message)
-        {
-            var label = DeskUi.Label(message, 12, Muted);
-            label.Margin = new Thickness(8);
-            graph.Content = label;
-        }
-        if (log is null || live)
-        {
-            Empty(live ? "Stop recording to build the RPM × MAP graph." : "Open a log to build the RPM × MAP graph.");
-            return;
-        }
-        var rpm = EngineSpeed(log);
-        var map = ManifoldPressure(log);
-        if (rpm is null || map is null)
-        {
-            Empty("This graph needs Engine RPM and MAP channels.");
-            return;
-        }
-
-        var measures = log.Channels.Where(c => c != rpm && c != map && c.Readings.Any(r => r.Number is not null)).ToArray();
-        if (measures.Length == 0)
-        {
-            Empty("Open a log with a numeric channel to summarize.");
-            return;
-        }
-        var picker = new ComboBox
-        {
-            ItemsSource = measures.Select(c => c.Label).ToArray(),
-            SelectedIndex = 0, MinWidth = 190
-        };
-        var table = new ContentControl();
-        void Update() => table.Content = Histogram(rpm, map, measures[Math.Max(0, picker.SelectedIndex)]);
-        picker.SelectionChanged += (_, _) => Update();
-        Update();
-        var panel = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Margin = new Thickness(5) };
-        Put(panel, Row(DeskUi.Section("RPM × MAP"), picker, DeskUi.Label("Mean / count", 11, Muted)), 0);
-        Put(panel, new ScrollViewer
-        {
-            Content = table, Margin = new Thickness(0, 5, 0, 0),
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
-        }, 1);
-        graph.Content = panel;
-    }
-
-    private static Control Histogram(Channel rpm, Channel map, Channel measure)
-    {
-        var cells = new Dictionary<(int Rpm, int Map), (double Total, int Count)>();
-        foreach (var reading in measure.Readings)
-        {
-            var r = rpm.AsOf(reading.Time);
-            var m = map.AsOf(reading.Time);
-            if (reading.Number is not double value || r?.Number is not double speed ||
-                m?.Number is not double pressure || reading.Time - r.Time > 500 ||
-                reading.Time - m.Time > 500 || speed < 0 || speed >= 12000 || pressure < 0 || pressure >= 400)
-                continue;
-            var key = ((int)speed / 500 * 500, (int)pressure / 10 * 10);
-            var current = cells.GetValueOrDefault(key);
-            cells[key] = (current.Total + value, current.Count + 1);
-        }
-        if (cells.Count == 0)
-            return Text("No samples align with RPM and MAP within 500 ms.", 14, Muted);
-        var rpms = cells.Keys.Select(key => key.Rpm).Distinct().Order().ToArray();
-        var maps = cells.Keys.Select(key => key.Map).Distinct().Order().ToArray();
-        var grid = new Grid { ColumnSpacing = 3, RowSpacing = 3 };
-        for (int i = 0; i <= rpms.Length; i++)
-            grid.ColumnDefinitions.Add(new ColumnDefinition(76, GridUnitType.Pixel));
-        for (int i = 0; i <= maps.Length; i++)
-            grid.RowDefinitions.Add(new RowDefinition(38, GridUnitType.Pixel));
-        Put(grid, Text("kPa / RPM", 11, Muted), 0, 0);
-        for (int col = 0; col < rpms.Length; col++)
-            Put(grid, Text(rpms[col].ToString(), 11, Accent), 0, col + 1);
-        for (int row = 0; row < maps.Length; row++)
-        {
-            Put(grid, Text(maps[row].ToString(), 11, Accent), row + 1);
-            for (int col = 0; col < rpms.Length; col++)
-            {
-                if (!cells.TryGetValue((rpms[col], maps[row]), out var cell))
-                    continue;
-                var contents = Text($"{cell.Total / cell.Count:0.##}\nn={cell.Count}", 11, DeskUi.Ink);
-                Put(grid, new Border
-                {
-                    Background = cell.Count >= 10 ? DeskUi.Edge : DeskUi.Header,
-                    CornerRadius = new CornerRadius(1), Padding = new Thickness(5, 2), Child = contents
-                }, row + 1, col + 1);
-            }
-        }
-        return grid;
     }
 
     private async Task Modal(string name, Control content, double width = 480, double height = 170)
@@ -929,7 +890,7 @@ sealed class ScannerWindow : Window
         modeText.Foreground = live ? Warning : Accent;
         openButton.IsEnabled = !connected && !busy;
         exportButton.IsEnabled = log is not null && !connected && !busy;
-        histogramButton.IsEnabled = log is not null && !connected && !busy;
+        histogramButton.IsEnabled = !busy;
         widebandButton.IsEnabled = log is not null && !connected && !busy;
         bool adapterAvailable = !connected && !busy && !pcmToolsOpen;
         recordButton.IsEnabled = codesButton.IsEnabled = gtButton.IsEnabled = refreshPorts.IsEnabled =

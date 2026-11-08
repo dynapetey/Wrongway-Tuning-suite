@@ -15,6 +15,20 @@ sealed class Channel(int key, int? pid, string name, string unit)
     public string Name { get; } = name;
     public string Unit { get; } = unit;
     public string Label => string.IsNullOrEmpty(Unit) ? Name : $"{Name} [{Unit}]";
+    public ChannelDisplay? Display { get; set; }
+    public string DisplayName => Display?.Name ?? Name;
+    public string DisplayUnit => Display?.Unit ?? Unit;
+    public string DisplayLabel => DisplayUnit.Length == 0 ? DisplayName : $"{DisplayName} [{DisplayUnit}]";
+    public double? DisplayNumber(Reading? reading)
+    {
+        if (reading?.Number is not double value)
+            return null;
+        double converted = Display is { } display ? value * display.Scale + display.Offset : value;
+        return double.IsFinite(converted) ? converted : null;
+    }
+    public string FormatDisplay(double value) => Display is { } display
+        ? value.ToString($"F{display.Decimals}", CultureInfo.InvariantCulture)
+        : value.ToString("0.##", CultureInfo.InvariantCulture);
     public List<Reading> Readings { get; private set; } = [];
 
     public void Sort() => Readings = Readings.OrderBy(r => r.Time).ToList();

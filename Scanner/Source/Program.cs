@@ -20,6 +20,8 @@ static class Program
             if (args is ["--self-test"])
             {
                 Console.WriteLine($"Live profile checks passed ({LiveScanner.SelfTest()} channels).");
+                ScannerLayout.SelfTest();
+                Console.WriteLine("Layout persistence and histogram checks passed.");
                 return 0;
             }
             if (args is ["--serial-test", var port])

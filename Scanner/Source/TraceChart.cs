@@ -21,6 +21,7 @@ sealed class TraceChart : Control
     private const double Bottom = 30;
 
     public IReadOnlyList<Channel> Channels { get; set; } = [];
+    public IReadOnlyDictionary<Channel, TraceSetting> TraceStyles { get; set; } = new Dictionary<Channel, TraceSetting>();
     public long ViewStart { get; set; }
     public long ViewEnd { get; set; } = 1;
     public long Origin { get; set; }
@@ -75,10 +76,11 @@ sealed class TraceChart : Control
         for (int i = 0; i < Channels.Count; i++)
         {
             var channel = Channels[i];
-            var brush = SeriesBrushes[i];
+            var style = TraceStyles.GetValueOrDefault(channel);
+            var brush = SeriesBrushes[style?.Color ?? i];
             double y = Top + i * lane;
             context.DrawLine(new Pen(Grid), new Point(0, y + lane), new Point(Bounds.Width, y + lane));
-            DrawSeries(context, channel, brush, new Rect(Left, y, width, lane), span);
+            DrawSeries(context, channel, style, brush, new Rect(Left, y, width, lane), span);
         }
         if (CursorTime >= ViewStart && CursorTime <= ViewEnd)
         {
@@ -87,11 +89,11 @@ sealed class TraceChart : Control
         }
     }
 
-    private void DrawSeries(DrawingContext context, Channel channel, IBrush brush, Rect area, double span)
+    private void DrawSeries(DrawingContext context, Channel channel, TraceSetting? style, IBrush brush, Rect area, double span)
     {
         using (context.PushClip(new Rect(7, area.Y, Left - 13, area.Height)))
         {
-            string name = channel.Name;
+            string name = channel.DisplayName;
             var label = Text(name, 11, brush);
             while (label.Width > Left - 15 && name.Length > 1)
             {
@@ -99,24 +101,29 @@ sealed class TraceChart : Control
                 label = Text(name + "…", 11, brush);
             }
             context.DrawText(label, new Point(8, area.Y + 5));
-            if (area.Height > 32 && channel.AsOf(CursorTime)?.Number is double value)
+            if (area.Height > 32 && channel.DisplayNumber(channel.AsOf(CursorTime)) is double value)
             {
-                var current = Text($"{value:0.##} {channel.Unit}".TrimEnd(), 12, Dim);
+                var current = Text($"{channel.FormatDisplay(value)} {channel.DisplayUnit}".TrimEnd(), 12, Dim);
                 context.DrawText(current, new Point(8, area.Y + 20));
             }
         }
 
         int start = Math.Max(0, channel.UpperBound(ViewStart) - 1);
         int end = Math.Min(channel.Readings.Count, channel.UpperBound(ViewEnd) + 1);
-        var points = channel.Readings.GetRange(start, Math.Max(0, end - start))
-            .Where(value => value.Number is not null).ToList();
+        var points = new List<(long Time, double Value)>(Math.Max(0, end - start));
+        for (int i = start; i < end; i++)
+        {
+            var reading = channel.Readings[i];
+            if (channel.DisplayNumber(reading) is double value)
+                points.Add((reading.Time, value));
+        }
         if (points.Count == 0)
         {
             context.DrawText(Text("No samples in view", 11, Dim), new Point(area.X + 8, area.Y + 6));
             return;
         }
-        double min = points.Min(p => p.Number!.Value);
-        double max = points.Max(p => p.Number!.Value);
+        double min = style?.Minimum ?? points.Min(p => p.Value);
+        double max = style?.Maximum ?? points.Max(p => p.Value);
         double range = max - min;
         if (range == 0)
         {
@@ -137,9 +144,9 @@ sealed class TraceChart : Control
 
         var geometry = new StreamGeometry();
         double height = Math.Max(1, area.Height - 12);
-        Point Locate(Reading reading) => new(
-            area.X + (reading.Time - ViewStart) / span * area.Width,
-            area.Bottom - 5 - (reading.Number!.Value - min) / range * height);
+        Point Locate((long Time, double Value) point) => new(
+            area.X + (point.Time - ViewStart) / span * area.Width,
+            area.Bottom - 5 - (point.Value - min) / range * height);
         using (var figure = geometry.Open())
         {
             figure.BeginFigure(Locate(points[0]), false);

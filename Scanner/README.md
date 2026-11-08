@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.4
+# WrongWay Scanner + Hammerdroid 0.4.5
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -20,10 +20,19 @@ on Wayland sessions.
   Use the slider, click on the chart, or press **Play**. Scroll over the chart
   to zoom and use **Full view** to reset the time range. The side panel shows
   the last recorded value at or before the cursor.
-- **Gauges** shows engine speed, MAP and throttle at the current cursor or
-  latest scan sample. **Graph** shows means and counts in 500 RPM by 10 kPa
-  bins during log review. Samples are matched to the most recent RPM and MAP
-  readings within 500 ms. Drag the panel dividers to resize the workspace.
+- **Edit gauges** adds, removes and reorders dial, bar, and digital gauges.
+  Choose each instrument's channel, label, range and color.
+- **Edit graph** sets the histogram's X, Y and value channels, fixed bin
+  widths or explicit breakpoints, mean/minimum/maximum/count, and minimum
+  samples. The histogram updates during recording. Samples are matched to
+  axis readings within 500 ms.
+- **Edit traces** sets the time chart order, colors and per-trace scale.
+  **Channels → Edit** controls labels, units, linear conversions, precision
+  and visibility. These settings change the displayed values. CSV exports
+  retain the recorded channel names, units and values.
+- Changes are saved automatically to `~/.config/wrongway-suite/scanner-layout.json`
+  (or under `$XDG_CONFIG_HOME`). **Layout** can export, load or reset the
+  settings. Drag the panel dividers to resize the workspace.
 - **Wideband AFR** adds a calculated channel from a voltage input. The starting
   formula is volts × 2 + 9.57. Adjust the scale and offset to match your gauge.
 - **Export CSV** writes the recorded channel updates, preserving sparse fields.
@@ -50,8 +59,14 @@ If the PCM does not answer, the adapter details remain visible. The app
 returns the GT to ELM mode and releases the port after the probe. **Stop**
 cancels an active operation.
 
-Select **WrongWayP59**, **Basics**, or **FuelTrims** and click **Record**.
-Choose a new file, and the app saves each complete frame as it arrives.
+Select **WrongWayP59**, **Basics**, **FuelTrims**, or **Custom** and click
+**Record**. Use **Edit live channels** to build a custom profile. Pick PIDs
+and RAM channels from the catalog, set their recording units and labels,
+and change their order. The profile must fit the PCM's 18-byte limit.
+The catalog starts with P59 OS 12587811 and switches to the OS returned
+by **Identify PCM and adapter**. Before recording, the scanner validates
+the custom profile against the connected PCM OS. Choose a new file, and
+the app saves each complete frame as it arrives.
 **Read DTCs** requests stored codes. The live scanner targets GM P01/P59
 J1850 VPW. The hardware controls share one operation at a time.
 
