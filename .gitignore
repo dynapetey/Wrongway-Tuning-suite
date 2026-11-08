@@ -1,0 +1,7 @@
+/Scanner/WrongWayScanner
+/build/
+**/bin/
+**/obj/
+**/__pycache__/
+*.pyc
+*.tar.gz

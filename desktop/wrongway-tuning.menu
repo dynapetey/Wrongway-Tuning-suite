@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Menu>
+  <Name>Xfce</Name>
+  <Menu>
+    <Name>Tuning</Name>
+    <Directory>wrongway-tuning.directory</Directory>
+    <Include>
+      <Filename>wrongway-suite.desktop</Filename>
+    </Include>
+  </Menu>
+  <Menu>
+    <Name>Accessories</Name>
+    <Exclude>
+      <Filename>wrongway-suite.desktop</Filename>
+    </Exclude>
+  </Menu>
+</Menu>

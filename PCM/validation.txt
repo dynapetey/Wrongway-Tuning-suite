@@ -1,0 +1,64 @@
+WrongWay Tuner Linux 0.2.0 validation
+
+Build host: Ubuntu 24.04 x86-64; Python 3.12; Mono 6.8; Tk 8.6.
+Native backend compiled with mcs without warnings.
+45 offline unit/integration tests passed.
+15 graphical desktop smoke checks passed using system Tk and Xvfb.
+POSIX serial open, send, receive and close passed with a pseudo-terminal.
+Python checksum repair passed unmodified PCM Hammer FileValidator on synthetic P01 and P59 images.
+Installer, launcher and test scripts passed shell syntax checks.
+All three main tabs were rendered and visually inspected.
+
+No real PCM/OBDX adapter was available. Hardware identification, read/write, live logging, DTC replies, recovery and other adapters remain untested. Synthetic tests do not establish real flashing reliability.
+
+Offline test output:
+test_argv_preserves_spaces_without_shell (test_backend.BackendTests.test_argv_preserves_spaces_without_shell) ... ok
+test_bad_file_cannot_reach_adapter (test_backend.BackendTests.test_bad_file_cannot_reach_adapter) ... ok
+test_checksum_repair_matches_upstream_validator (test_backend.BackendTests.test_checksum_repair_matches_upstream_validator) ... ok
+test_load_actual_backend_dependencies (test_backend.BackendTests.test_load_actual_backend_dependencies) ... ok
+test_missing_serial_device_reports_error (test_backend.BackendTests.test_missing_serial_device_reports_error) ... ok
+test_serial_loopback_native_linux (test_backend.BackendTests.test_serial_loopback_native_linux) ... ok
+test_unknown_operation_rejected (test_backend.BackendTests.test_unknown_operation_rejected) ... ok
+test_valid_image_still_requires_separate_backup (test_backend.BackendTests.test_valid_image_still_requires_separate_backup) ... ok
+test_write_requires_explicit_confirmation (test_backend.BackendTests.test_write_requires_explicit_confirmation) ... ok
+test_affine_nested (test_core.EditingTests.test_affine_nested) ... ok
+test_affine_rejects_code_and_nonlinear (test_core.EditingTests.test_affine_rejects_code_and_nonlinear) ... ok
+test_batch_is_atomic (test_core.EditingTests.test_batch_is_atomic) ... ok
+test_batch_single_undo (test_core.EditingTests.test_batch_single_undo) ... ok
+test_float_endianness (test_core.EditingTests.test_float_endianness) ... ok
+test_limits_and_overlapping_strides (test_core.EditingTests.test_limits_and_overlapping_strides) ... ok
+test_negative_half_rounds_away (test_core.EditingTests.test_negative_half_rounds_away) ... ok
+test_new_edit_invalidates_redo (test_core.EditingTests.test_new_edit_invalidates_redo) ... ok
+test_no_op_has_no_history (test_core.EditingTests.test_no_op_has_no_history) ... ok
+test_rejected_edits_leave_bytes_unchanged (test_core.EditingTests.test_rejected_edits_leave_bytes_unchanged) ... ok
+test_signed_big_endian (test_core.EditingTests.test_signed_big_endian) ... ok
+test_strided_offsets (test_core.EditingTests.test_strided_offsets) ... ok
+test_switch_preserves_other_bits (test_core.EditingTests.test_switch_preserves_other_bits) ... ok
+test_table_csv_and_tsv (test_core.EditingTests.test_table_csv_and_tsv) ... ok
+test_table_offsets (test_core.EditingTests.test_table_offsets) ... ok
+test_undo_redo_exact (test_core.EditingTests.test_undo_redo_exact) ... ok
+test_unsigned_little_endian (test_core.EditingTests.test_unsigned_little_endian) ... ok
+test_atomic_save_preserves_overwritten_file (test_core.FileAndChecksumTests.test_atomic_save_preserves_overwritten_file) ... ok
+test_bad_signature_or_layout_rejected (test_core.FileAndChecksumTests.test_bad_signature_or_layout_rejected) ... ok
+test_json_definitions_roundtrip (test_core.FileAndChecksumTests.test_json_definitions_roundtrip) ... ok
+test_os_checksum_excludes_parameter_and_calibration_area (test_core.FileAndChecksumTests.test_os_checksum_excludes_parameter_and_calibration_area) ... ok
+test_p01_checksum_repair (test_core.FileAndChecksumTests.test_p01_checksum_repair) ... ok
+test_p59_checksum_repair_and_undo (test_core.FileAndChecksumTests.test_p59_checksum_repair_and_undo) ... ok
+test_save_failure_preserves_original (test_core.FileAndChecksumTests.test_save_failure_preserves_original) ... ok
+test_xdf_demo (test_core.FileAndChecksumTests.test_xdf_demo) ... ok
+test_xdf_external_entities_rejected (test_core.FileAndChecksumTests.test_xdf_external_entities_rejected) ... ok
+test_xdf_reports_unsupported (test_core.FileAndChecksumTests.test_xdf_reports_unsupported) ... ok
+test_csv_duplicate_headers_rejected (test_core.LogTests.test_csv_duplicate_headers_rejected) ... ok
+test_custom_math_bracket_names (test_core.LogTests.test_custom_math_bracket_names) ... ok
+test_histogram_bins_and_missing_rows (test_core.LogTests.test_histogram_bins_and_missing_rows) ... ok
+test_histogram_rejects_zero_bin_width (test_core.LogTests.test_histogram_rejects_zero_bin_width) ... ok
+test_invalid_math_rows_remain_blank (test_core.LogTests.test_invalid_math_rows_remain_blank) ... ok
+test_math_rejects_code (test_core.LogTests.test_math_rejects_code) ... ok
+test_missing_column_and_duplicate_math_name (test_core.LogTests.test_missing_column_and_duplicate_math_name) ... ok
+test_user_afr_conversion (test_core.LogTests.test_user_afr_conversion) ... ok
+test_valid_formula_with_zero_denominator_row (test_core.LogTests.test_valid_formula_with_zero_denominator_row) ... ok
+
+----------------------------------------------------------------------
+Ran 45 tests in 2.120s
+
+OK

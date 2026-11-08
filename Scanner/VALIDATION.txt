@@ -1,0 +1,18 @@
+WrongWay Scanner + Hammerdroid 0.4.3 · Linux x86-64
+
+The .NET 8 release build and self-contained publish passed. The OS
+12587811 XDF loaded 1,303 parameters, including 1,269 writable parameters
+and all 21 text fields. Tests decoded 31,375 cells on each of two 811 BINs
+and verified that all numeric edit strings round-trip to the decoded value.
+
+The tests covered VIN slots, blank bytes, broadcast code and PCM serial
+text, hex checksums, On and Off inputs, and per-cell address overrides.
+A decoded calibration text edit and a Reverse ratio edit reopened from a
+saved BIN copy. Only the mapped bytes and their checksum changed. Numeric
+calibration edits, undo, redo, three scanner profiles, and 11 simulated GT
+serial tests also passed.
+
+Three switches have masks wider than the storage declared by the XDF and
+are listed under Skipped XDF items. The 0.4.3 verification covered the BIN
+reader, editor model, and packaged command-line checks. Desktop rendering
+and live PCM operations were outside this verification.

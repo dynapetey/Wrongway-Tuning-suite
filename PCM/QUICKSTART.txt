@@ -1,0 +1,32 @@
+Start with your original PCM backup
+
+1. Plug the OBDX Pro GT into USB and the PCM. Ignition ON, engine OFF.
+2. Refresh ports, choose the serial port, and Read properties.
+3. Read full backup to a new filename. Keep a separate untouched copy.
+4. Open the BIN. Import an XDF matching its OS, or add custom definitions.
+5. Confirm the match, edit, repair checksums, and Save BIN as.
+6. Validate the saved file, Test write, then Review & write with the original backup.
+
+Available here
+
+• Native Linux desktop; no account, credits or per-vehicle tune fees.
+• Custom scalars, switches and tables; signed integers, floats and either byte order.
+• JSON definitions, supported XDF import, clipboard/CSV tables and range edits.
+• Undo/redo, atomic saves, BIN comparison, and P01/P59 checksum validation/repair.
+• Native serial identification, backup reads, compare, test write and write modes.
+• Calibration, parameters, OS + calibration + boot, full clone and P59 recovery.
+• Live PCM Logger profiles, CSV logs, calculated channels, plots and histograms.
+• Standard emissions DTC read requests and clear requests; responses vary by PCM.
+
+Compatibility
+
+This build targets P01/P59. HP .HPT files, MPVI interfaces, Windows J2534 DLLs,
+CAN controllers and automatic BLE pairing are not implemented. Unsupported XDF
+features appear in the import report. Supply a verified XDF for the actual PCM OS.
+
+Real PCM read/write, logging, DTC parsing and recovery remain untested. Serial
+loopback and synthetic tests do not establish vehicle compatibility. Never flash
+the synthetic examples. Use stable battery support when flashing.
+
+Run bash install.sh on Ubuntu/Mint, then bash launch.sh. Source and tests are
+included. Run bash test.sh for offline checks. See README.md for details.

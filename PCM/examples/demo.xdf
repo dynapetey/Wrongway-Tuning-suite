@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<XDFFORMAT version="1.70">
+  <XDFHEADER><deftitle>SYNTHETIC DEMO — not a vehicle calibration</deftitle><BASEOFFSET offset="0" subtract="0"/></XDFHEADER>
+  <XDFCONSTANT><title>Demo idle target</title><units>rpm</units><EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedtypeflags="0x00"/><MATH equation="X"><VAR id="X"/></MATH></XDFCONSTANT>
+  <XDFFLAG><title>Demo switch</title><EMBEDDEDDATA mmedaddress="0x4" mmedelementsizebits="8"/><mask>0x02</mask></XDFFLAG>
+  <XDFTABLE><title>Demo table</title>
+    <XDFAXIS id="x"><LABEL index="0" value="800"/><LABEL index="1" value="1200"/><LABEL index="2" value="1600"/><LABEL index="3" value="2000"/></XDFAXIS>
+    <XDFAXIS id="y"><LABEL index="0" value="20"/><LABEL index="1" value="40"/><LABEL index="2" value="60"/><LABEL index="3" value="80"/></XDFAXIS>
+    <XDFAXIS id="z"><units>%</units><EMBEDDEDDATA mmedaddress="0x20" mmedelementsizebits="8" mmedrowcount="4" mmedcolcount="4"/><MATH equation="X / 2"><VAR id="X"/></MATH></XDFAXIS>
+  </XDFTABLE>
+</XDFFORMAT>

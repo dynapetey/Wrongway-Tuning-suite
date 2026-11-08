@@ -1,0 +1,25 @@
+WrongWay Tuner Linux 0.2.0
+
+The independent Python desktop/editor is MIT licensed (../LICENSE.txt).
+The separately invoked Linux PCM backend is GPL-3.0-only. Its complete custom
+source is ../backend/source/LinuxBackend.cs.
+
+Unmodified PCM Hammer PcmLibrary.dll, logging definitions/profiles and
+Kernel-P01.bin originate in the official PCM Hammer 2.0.0 portable release.
+Release archive SHA-256:
+b4b24fdede9e61877273c3f020d881589ac05987524006b23d3ff081670beb04
+https://github.com/PcmHammer/PcmHammer/releases/tag/2.0.0
+Tag source tree: 34d3984b9b0ad3790616f995552ba47229ae1558
+
+The original managed source is PCM-Hammer-managed-source-2.0.0.zip.
+The corresponding upstream kernel source and build files are supplied in
+PCM-Hammer-kernel-source-2.0.0/Kernels, unchanged apart from text line endings.
+The GPL license is PCM-Hammer-LICENSE.txt. Additional dependency notices and
+their license texts are in THIRD-PARTY-NOTICES.txt.
+
+WrongWayP59.LogProfile is an additional profile selecting upstream voltage,
+RPM, airflow, load and spark parameters. The custom Linux frontend adds the
+user's 9.57-based AFR calculation independently; upstream files are not patched.
+
+This package includes no HP Tuners proprietary or decompiled code, activation
+changes or MPVI driver. No vehicle calibration is distributed as an example.

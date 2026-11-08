@@ -1,0 +1,58 @@
+{
+  "FormatVersion": 1,
+  "Title": "SYNTHETIC DEMO \u2014 not a vehicle calibration",
+  "ExpectedOS": "",
+  "Parameters": [
+    {
+      "Title": "Demo idle target",
+      "Group": "Demo only",
+      "Address": "0x0",
+      "Storage": "Unsigned",
+      "ByteWidth": 2,
+      "LittleEndian": false,
+      "Rows": 1,
+      "Columns": 1,
+      "Scale": 1,
+      "Offset": 0,
+      "Units": "rpm",
+      "Minimum": 0,
+      "Maximum": 2000
+    },
+    {
+      "Title": "Demo switch",
+      "Group": "Demo only",
+      "Address": "0x4",
+      "Storage": "Flag",
+      "ByteWidth": 1,
+      "Bit": 1,
+      "Rows": 1,
+      "Columns": 1,
+      "Scale": 1,
+      "Offset": 0
+    },
+    {
+      "Title": "Demo table",
+      "Group": "Demo only",
+      "Address": "0x20",
+      "Storage": "Unsigned",
+      "ByteWidth": 1,
+      "Rows": 4,
+      "Columns": 4,
+      "Scale": 0.5,
+      "Offset": 0,
+      "Units": "%",
+      "RowLabels": [
+        "20",
+        "40",
+        "60",
+        "80"
+      ],
+      "ColumnLabels": [
+        "800",
+        "1200",
+        "1600",
+        "2000"
+      ]
+    }
+  ]
+}

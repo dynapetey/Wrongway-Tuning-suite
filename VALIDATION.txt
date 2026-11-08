@@ -1,0 +1,28 @@
+WrongWay Suite 0.4.4 · Linux x86-64
+
+The integrated scanner built and published with the .NET 8 SDK. Launching
+through the suite loaded all three scanner profiles and 1,303 entries from
+the 811 BIN/XDF. The scanner also passed 11 simulated OBDX Pro GT tests.
+
+The suite lock rejected a second launch and released after the first
+process. The installer generated a valid desktop shortcut for a path with
+spaces using a stand-in for the Mono preflight. The PCM launcher parsed its
+PCM-only mode and port handoff arguments. All component PCM manifest hashes
+were verified against the packaged files.
+
+The shipped PCM backend, kernel and support assemblies match the prior
+PCM component. The prior Mono and Tk tests are in PCM/validation.txt.
+The 45 PCM tests also passed under an offline .NET 8 compatibility harness
+with its own JSON assembly. The new desktop window handoff and physical
+PCM reads or flashes were outside this verification.
+
+The installer registers the Tuning category in the Xfce application launcher
+using the desktop menu merge directory. Xfce's menu library loaded the
+merged menu and resolved WrongWay Suite under Tuning after two installs.
+
+The 0.4.4 release rebuilt the scanner and map editor as a self-contained
+Linux executable using the .NET 8 SDK. The real 811 XDF loaded all 1,303
+parameters. Scanner profiles and the simulated OBDX Pro GT tests passed.
+The category tab minimum height increased from 30 to 33 pixels.
+The dark scanner, map workspace with Main VE loaded, and PCM window were
+inspected on the Mint Xfce device. The visual check used the app's offline views.
