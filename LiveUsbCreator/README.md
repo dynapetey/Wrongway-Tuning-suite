@@ -28,3 +28,35 @@ python3 build_bundle.py --base-tree /path/to/verified/live-tree \
   --update-layer /path/to/zzz-wrongway-update.squashfs \
   --output WrongWay-Live-USB-Creator-Windows-v0.4.8.zip
 ```
+
+## Linux live ISO
+
+The hybrid 0.4.9 ISO boots on x64 UEFI and legacy BIOS. Its ext4 partition
+labeled `writable` provides about 4 GiB of storage across boots. Use an
+8 GB or larger USB and write the ISO as a disk image to the whole device.
+Image writing replaces the partition table and the files on that USB.
+In a VM, attach a fresh copy of the ISO as a writable **USB disk** with
+raw format to use its persistence partition. A virtual DVD is read-only.
+Save settings, logs, and BIN copies under `/home/wrongway` and shut down
+before disconnecting the device.
+
+Download both numbered `.iso.gz.part-*` files and `SHA256SUMS` from the
+[Linux live ISO release](https://github.com/dynapetey/Wrongway-Tuning-suite/releases/tag/live-iso-v0.4.9).
+Run these commands in the download directory to assemble and verify the ISO.
+
+```sh
+sha256sum --ignore-missing -c SHA256SUMS
+cat WrongWay-Tuning-Live-0.4.9.iso.gz.part-00 WrongWay-Tuning-Live-0.4.9.iso.gz.part-01 \
+  | gzip -dc > WrongWay-Tuning-Live-0.4.9.iso
+sha256sum -c SHA256SUMS
+```
+
+To rebuild, use the existing WrongWay Tuning Live hybrid ISO based on
+Linux Mint 21.1 Xfce, and a matching Linux suite directory containing the
+published `Scanner/WrongWayScanner`. The build needs `xorriso`,
+`squashfs-tools`, and `e2fsprogs`.
+
+```sh
+sh LiveUsbCreator/build_iso.sh /path/to/WrongWay-Tuning-Live-0.4.5.iso \
+  /path/to/suite 0.4.9 /path/to/WrongWay-Tuning-Live-0.4.9.iso
+```

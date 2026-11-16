@@ -76,3 +76,10 @@ and licensing for that component are in `PCM/README.md`.
 The Windows creator formats a selected USB drive and installs WrongWay Tuning
 Live with persistent storage. See the [creator instructions](LiveUsbCreator/README.md)
 and download the [Windows release](https://github.com/dynapetey/Wrongway-Tuning-suite/releases/tag/live-usb-creator-v0.4.8).
+
+## Boot the Linux live ISO
+
+Use the [0.4.9 live ISO release](https://github.com/dynapetey/Wrongway-Tuning-suite/releases/tag/live-iso-v0.4.9)
+for the latest scanner and **Scan → Read ECM PIDs**. It opens the scanner
+automatically and includes the Linux PCM Hammer backend. See the [ISO instructions](LiveUsbCreator/README.md#linux-live-iso)
+for writable USB and VM boot, checksums, and how to rebuild the image.
