@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.5
+# WrongWay Scanner + Hammerdroid 0.4.7
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -63,16 +63,51 @@ Select **WrongWayP59**, **Basics**, **FuelTrims**, or **Custom** and click
 **Record**. Use **Edit live channels** to build a custom profile. Pick PIDs
 and RAM channels from the catalog, set their recording units and labels,
 and change their order. The profile must fit the PCM's 18-byte limit.
-The catalog starts with P59 OS 12587811 and switches to the OS returned
-by **Identify PCM and adapter**. Before recording, the scanner validates
-the custom profile against the connected PCM OS. Choose a new file, and
-the app saves each complete frame as it arrives.
+The **Channels** pane automatically opens with the PCM Logger definitions
+for P59 OS 12587811. Search by name, decimal PID, hex PID such as `0x000C`,
+or RAM address where one is defined. Click **+** to add an entry to an
+editable copy of the selected profile. **Recorded only** shows the channels
+from your current recording or log. Identification and recording use the
+OS returned by the PCM. Availability also depends on the vehicle and its
+calibration. Choose a new recording file and the app saves each complete
+frame as it arrives.
 **Read DTCs** requests stored codes. The live scanner targets GM P01/P59
 J1850 VPW. The hardware controls share one operation at a time.
 
 The GT and PCM identification paths passed a simulated serial test. USB
 and RFCOMM hardware, real PCM logging, and stored-code reads still need a
 vehicle test. 
+
+## Read the scanner from tools
+
+```sh
+./WrongWayScanner --catalog 12587811
+./WrongWayScanner --scanner-status
+```
+
+`--catalog` returns the bundled definitions and available units. Omit the OS
+to use 12587811. `--scanner-status` returns the running scanner's mode, last
+identified OS, profile, cursor time, and decoded numeric readings. It uses a
+private Unix socket for the same Linux user and works while the GUI holds the
+suite session lock. Both commands return versioned JSON. They only read
+application state and definitions.
+
+For the live VM, expose a local QEMU virtio serial device with the name
+`org.wrongway.readout`. The guest session runs `readout-bridge.py guest` with
+the installed scanner path when that port is available. The device needs read
+and write permissions for the guest session user. On the host, use a socket
+path inside a private directory.
+
+```sh
+# QEMU arguments
+-chardev socket,id=wrongway,path=/private/path/scanner-readout.sock,server=on,wait=off
+-device virtio-serial-pci
+-device virtserialport,chardev=wrongway,name=org.wrongway.readout
+
+# Host commands
+python3 readout-bridge.py host /private/path/scanner-readout.sock status
+python3 readout-bridge.py host /private/path/scanner-readout.sock catalog
+```
 
 ## Edit a P59 tune
 

@@ -23,6 +23,7 @@ sealed partial class ScannerWindow : Window
     private readonly TextBlock status = new();
     private readonly TextBlock clock = new();
     private readonly TextBox filter = new() { Watermark = "Find a channel or PID" };
+    private readonly CheckBox recordedOnly = new() { Content = "Recorded only", MinHeight = 22 };
     private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
     private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
@@ -54,6 +55,7 @@ sealed partial class ScannerWindow : Window
     private bool live;
     private bool busy;
     private bool pcmToolsOpen;
+    private uint? lastIdentifiedOs;
     private long cursor;
     private long playOrigin;
 
@@ -132,19 +134,15 @@ sealed partial class ScannerWindow : Window
         var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton,
             DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
-        var columns = new DockPanel { LastChildFill = true };
-        var valueTitle = DeskUi.Label("Value", 11, Muted);
-        DockPanel.SetDock(valueTitle, Dock.Right);
-        columns.Children.Add(valueTitle);
-        columns.Children.Add(DeskUi.Label("Name", 11, Muted));
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
         var channelEdit = Button("Edit", EditDisplayChannels);
         Put(sidebar, DeskUi.Strip(Header("Channels", channelEdit), DeskUi.Header), 0);
         sidebar.ContextMenu = new ContextMenu { Items = { DeskUi.Action("Edit display channels…", editChannels), DeskUi.Action("Edit live channels…", editLive) } };
         filter.Margin = new Thickness(5);
         Put(sidebar, filter, 1);
-        Put(sidebar, DeskUi.Strip(columns), 2);
-        Put(sidebar, new ScrollViewer { Content = channelList }, 3);
+        Put(sidebar, DeskUi.Strip(recordedOnly), 2);
+        Put(sidebar, new ScrollViewer { Content = channelList,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, 3);
         Put(sidebar, DeskUi.Strip(channelCount), 4);
 
         var gaugePane = PanelWithEditor(gaugeGrid, editGauges, "Edit gauges…");
@@ -225,6 +223,7 @@ sealed partial class ScannerWindow : Window
             }
         };
         filter.TextChanged += (_, _) => PopulateChannels();
+        recordedOnly.IsCheckedChanged += (_, _) => PopulateChannels();
         KeyDown += async (_, args) =>
         {
             if (args.Key == Key.O && args.KeyModifiers.HasFlag(KeyModifiers.Control))
@@ -254,6 +253,19 @@ sealed partial class ScannerWindow : Window
             if (Program.StartupFile is { } path)
                 await OpenLog(path);
         };
+        if (OperatingSystem.IsLinux())
+        {
+            try
+            {
+                var readout = new ScannerReadout(async () => await Dispatcher.UIThread.InvokeAsync(ScannerStatus));
+                Closed += (_, _) => readout.Dispose();
+            }
+            catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException or UnauthorizedAccessException or ArgumentException)
+            {
+                SetStatus("Local scanner readout unavailable. " + ex.Message, true);
+            }
+        }
+        PopulateChannels();
         RefreshButtons();
     }
 
@@ -382,17 +394,28 @@ sealed partial class ScannerWindow : Window
     {
         channelList.Children.Clear();
         displayedValues.Clear();
-        channelCount.Text = $"{log?.Channels.Count ?? 0} channels";
-        if (log is null)
-            return;
         string search = filter.Text?.Trim() ?? "";
-        foreach (var channel in log.Channels)
+        if (log is { } current)
+            AddRecordedChannels(current, search);
+        if (recordedOnly.IsChecked == true)
+            channelCount.Text = $"{displayedValues.Count} recorded channels";
+        else
+            AddCatalogChannels(search);
+        RefreshChart();
+    }
+
+    private void AddRecordedChannels(ScanLog current, string search)
+    {
+        foreach (var channel in current.Channels)
         {
             if (channel.Display?.Hidden == true ||
                 !channel.DisplayLabel.Contains(search, StringComparison.OrdinalIgnoreCase) &&
                 !channel.Label.Contains(search, StringComparison.OrdinalIgnoreCase) &&
-                !(channel.Pid?.ToString(CultureInfo.InvariantCulture).Contains(search) ?? false))
+                !(channel.Pid?.ToString(CultureInfo.InvariantCulture).Contains(search) ?? false) &&
+                !(channel.Pid is { } searchPid && $"0x{searchPid:X4}".Contains(search, StringComparison.OrdinalIgnoreCase)))
                 continue;
+            if (displayedValues.Count == 0)
+                channelList.Children.Add(DeskUi.Strip(DeskUi.Section("Recorded channels")));
             var value = Text("—", 11, Muted);
             value.TextTrimming = TextTrimming.CharacterEllipsis;
             value.MaxWidth = 90;
@@ -412,8 +435,8 @@ sealed partial class ScannerWindow : Window
             ToolTip.SetTip(name, channel.DisplayLabel + (channel.Pid is { } pid ? $" · PID {pid}" : ""));
             name.IsCheckedChanged += (_, _) =>
             {
-                var source = ChannelSource.From(log, channel);
-                var traces = CurrentTraces().Where(trace => trace.Source.Resolve(log) != channel).ToList();
+                var source = ChannelSource.From(current, channel);
+                var traces = CurrentTraces().Where(trace => trace.Source.Resolve(current) != channel).ToList();
                 if (name.IsChecked == true)
                 {
                     if (traces.Count >= 6)
@@ -435,8 +458,65 @@ sealed partial class ScannerWindow : Window
             });
             displayedValues[channel] = value;
         }
-        RefreshChart();
     }
+
+    private void AddCatalogChannels(string search)
+    {
+        channelList.Children.Add(DeskUi.Strip(DeskUi.Section($"PCM OS {liveOs} catalog")));
+        int count = 0;
+        foreach (var channel in catalog.Where(item => item.Matches(search)))
+        {
+            var add = Button("+", () => EditLiveChannels(channel));
+            Avalonia.Automation.AutomationProperties.SetName(add, $"Add {channel.Name} to recording profile");
+            ToolTip.SetTip(add, "Add to live recording profile");
+            DockPanel.SetDock(add, Dock.Right);
+            var address = Text(channel.AddressLabel, 10, Muted);
+            address.Margin = new Thickness(3, 0, 6, 0);
+            DockPanel.SetDock(address, Dock.Right);
+            var name = Text(channel.Name, 12, DeskUi.Ink);
+            name.Margin = new Thickness(5, 0, 0, 0);
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            ToolTip.SetTip(name, $"{channel} · {string.Join(", ", channel.Units)}");
+            channelList.Children.Add(new Border
+            {
+                Background = count++ % 2 == 0 ? DeskUi.Surface : DeskUi.Frame,
+                Child = new DockPanel { Children = { add, address, name } }
+            });
+        }
+        channelCount.Text = $"{count} of {catalog.Length} PCM channels · {displayedValues.Count} recorded";
+    }
+
+    private void IdentifyOs(uint os)
+    {
+        lastIdentifiedOs = os;
+        if (liveOs == os)
+            return;
+        catalog = LiveScanner.Catalog(os);
+        liveOs = os;
+        PopulateChannels();
+    }
+
+    private object ScannerStatus() => new
+    {
+        SchemaVersion = 1,
+        AppVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
+        CapturedUtc = DateTimeOffset.UtcNow,
+        Mode = modeText.Text,
+        CatalogOs = liveOs,
+        CatalogChannelCount = catalog.Length,
+        LastIdentifiedOs = lastIdentifiedOs,
+        Profile = profile.SelectedItem as string,
+        CustomProfileChannels = profile.SelectedItem as string == LiveScanner.Custom ? scannerLayout.LiveChannels : null,
+        Frames = log?.Frames ?? 0,
+        CursorMilliseconds = log is null ? (long?)null : cursor - log.Start,
+        Channels = log?.Channels.Where(channel => channel.Display?.Hidden != true).Select(channel =>
+        {
+            var reading = channel.AsOf(cursor);
+            return new { channel.Key, channel.Pid, Name = channel.DisplayName, Unit = channel.DisplayUnit,
+                Value = channel.DisplayNumber(reading),
+                SampleMilliseconds = reading is null ? (long?)null : reading.Time - log.Start };
+        }).ToArray() ?? []
+    };
 
     private void Seek(long time)
     {
@@ -601,7 +681,7 @@ sealed partial class ScannerWindow : Window
         details.Children.Add(Text($"OBD port voltage   {inspection.Adapter.Voltage:0.00} V", 13, DeskUi.Ink));
         if (inspection.Pcm is { } pcm)
         {
-            liveOs = pcm.OsId;
+            IdentifyOs(pcm.OsId);
             details.Children.Add(Text("PCM OS ID   " + pcm.OsId, 13, DeskUi.Ink));
         }
         if (inspection.Pcm?.Vin is { } vin)
@@ -647,6 +727,7 @@ sealed partial class ScannerWindow : Window
         await RunHardware(async token =>
         {
             await LiveScanner.Record(device, selection, custom, path, PostStatus,
+                os => Dispatcher.UIThread.Post(() => IdentifyOs(os)),
                 reading => Dispatcher.UIThread.Post(() => AppendLive(next, reading)), token);
         }, recording: true);
     }

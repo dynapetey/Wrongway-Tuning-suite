@@ -6,6 +6,7 @@ case "${1:-}" in
     -h|--help)
         printf '%s\n' 'Usage: ./launch.sh [scanner [log.hpl|log.csv]]' \
             '       ./launch.sh scanner --tune BIN XDF' \
+            '       ./launch.sh scanner --catalog [OS] | --scanner-status' \
             '       ./launch.sh pcm [--port /dev/ttyUSB0]'
         exit 0
         ;;
@@ -21,6 +22,12 @@ case "${1:-}" in
         set -- "$suite_dir/Scanner/WrongWayScanner" "$@"
         ;;
 esac
+
+if [ "$1" = "$suite_dir/Scanner/WrongWayScanner" ]; then
+    case "${2:-}" in
+        --catalog|--scanner-status|--inspect|--tune-inspect) exec "$@" ;;
+    esac
+fi
 
 if ! command -v flock >/dev/null 2>&1; then
     printf '%s\n' 'Install util-linux to enable the suite session lock.' >&2

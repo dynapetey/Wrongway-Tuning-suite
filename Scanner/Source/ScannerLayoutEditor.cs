@@ -17,6 +17,7 @@ sealed partial class ScannerWindow
     private readonly Dictionary<Channel, TraceSetting> traceStyles = [];
     private ScannerLayout scannerLayout = ScannerLayout.Default;
     private uint liveOs = LiveScanner.DefaultOs;
+    private LiveChannelChoice[] catalog = LiveScanner.Catalog(LiveScanner.DefaultOs);
 
     private static DockPanel Header(string name, Control action)
     {
@@ -238,7 +239,9 @@ sealed partial class ScannerWindow
             ShowHistogram();
     }
 
-    private async Task EditLiveChannels()
+    private Task EditLiveChannels() => EditLiveChannels(null);
+
+    private async Task EditLiveChannels(LiveChannelChoice? add)
     {
         if (hardware is not null || pcmToolsOpen)
         {
@@ -247,18 +250,19 @@ sealed partial class ScannerWindow
         }
 
         uint os = liveOs;
-        var catalog = LiveScanner.Catalog(os);
+        var catalog = this.catalog;
         if (catalog.Length == 0)
             throw new InvalidDataException($"No live channels are available for PCM OS {os}.");
         string selected = (string?)profile.SelectedItem ?? LiveScanner.Profiles[0];
-        var seed = scannerLayout.LiveChannels ?? LiveScanner.ProfileSettings(
-            selected == LiveScanner.Custom ? LiveScanner.Profiles[0] : selected, os);
+        var seed = selected == LiveScanner.Custom ? scannerLayout.LiveChannels ?? [] : LiveScanner.ProfileSettings(selected, os);
+        if (add is not null && !seed.Any(item => item.Id == add.Id))
+            seed = [.. seed, new LiveChannelSetting(add.Id, add.Units[0], add.Name)];
         var catalogById = catalog.ToDictionary(item => item.Id);
         var result = await EditList("Live recording channels",
             $"PCM OS {os} · Select PIDs and RAM channels. Each uses 1 or 2 bytes of the {LiveScanner.MaximumLiveBytes}-byte PCM limit.",
             seed, LiveScanner.MaximumLiveBytes, (owner, channel) =>
             {
-                var search = new TextBox { Watermark = "Find a name or ID" };
+                var search = new TextBox { Watermark = "Find a name, PID or RAM address" };
                 int selectedChannel = Array.FindIndex(catalog, item => item.Id == channel?.Id);
                 var parameter = Choice(catalog, selectedChannel);
                 var units = Choice(Array.Empty<string>(), -1);
@@ -274,8 +278,7 @@ sealed partial class ScannerWindow
                 {
                     var last = parameter.SelectedItem as LiveChannelChoice;
                     string query = search.Text?.Trim() ?? "";
-                    var filtered = catalog.Where(item => item.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
-                        || item.Id.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    var filtered = catalog.Where(item => item.Matches(query)).ToArray();
                     parameter.ItemsSource = filtered;
                     int index = Array.IndexOf(filtered, last);
                     parameter.SelectedIndex = index >= 0 ? index : filtered.Length > 0 ? 0 : -1;

@@ -8,9 +8,16 @@ namespace WrongWay;
 sealed record LiveColumn(string Id, string Name, string Unit, int? Pid);
 sealed record LiveReading(long Time, LiveColumn[] Columns, Reading[] Values);
 
-sealed record LiveChannelChoice(string Id, string Name, string[] Units, int Bytes)
+sealed record LiveChannelChoice(string Id, string Name, string[] Units, int Bytes, uint? Pid, uint? RamAddress)
 {
-    public override string ToString() => $"{Name}  ·  {Id}";
+    public string? PidHex => Pid is { } pid ? $"0x{pid:X4}" : null;
+    public string AddressLabel => PidHex ?? (RamAddress is { } address ? $"RAM 0x{address:X6}" : Id);
+    public override string ToString() => $"{Name}  ·  {AddressLabel}";
+
+    public bool Matches(string search) => Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || Id.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || AddressLabel.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || Pid?.ToString(CultureInfo.InvariantCulture) == search;
 }
 
 static class LiveScanner
@@ -26,7 +33,9 @@ static class LiveScanner
         Database().ListParametersBySupportedOs(os).OfType<PcmParameter>()
             .Where(parameter => parameter.ByteCount > 0 && parameter.Conversions.Any())
             .Select(parameter => new LiveChannelChoice(parameter.Id, parameter.Name,
-                parameter.Conversions.Select(conversion => conversion.Units).Distinct().ToArray(), parameter.ByteCount))
+                parameter.Conversions.Select(conversion => conversion.Units).Distinct().ToArray(), parameter.ByteCount,
+                (parameter as PidParameter)?.PID,
+                parameter is RamParameter ram && ram.TryGetAddress(os, out uint address) ? address : null))
             .OrderBy(choice => choice.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
     public static LiveChannelSetting[] ProfileSettings(string name, uint os) =>
@@ -82,6 +91,10 @@ static class LiveScanner
             total += columns;
         }
         var sample = ProfileSettings(Profiles[0], DefaultOs);
+        var catalog = Catalog(DefaultOs);
+        if (!catalog.Any(channel => channel.Pid == 0x000C && channel.Matches("0x000C") && channel.Matches("12")) ||
+            sample.Any(channel => !catalog.Any(choice => choice.Id == channel.Id)))
+            throw new InvalidDataException("The P59 catalog is missing PID or profile definitions.");
         if (sample.Length == 0 || CreateProfile(db, DefaultOs, sample).Columns.Count() != sample.Length)
             throw new InvalidDataException("Custom live profile could not rebuild the P59 channels.");
         try
@@ -114,7 +127,7 @@ static class LiveScanner
 
     public static async Task Record(
         string port, string profileName, LiveChannelSetting[]? custom, string path, Action<string> status,
-        Action<LiveReading> reading, CancellationToken token)
+        Action<uint> identify, Action<LiveReading> reading, CancellationToken token)
     {
         if (File.Exists(path))
             throw new IOException("Choose a new CSV filename so the previous log is preserved.");
@@ -124,6 +137,7 @@ static class LiveScanner
             var os = await vehicle.QueryOperatingSystemId(token);
             if (os.Status != ResponseStatus.Success)
                 throw new IOException("The PCM did not return its operating system ID.");
+            identify(os.Value);
             var database = Database();
             var profile = profileName == Custom
                 ? CreateProfile(database, os.Value, custom ?? [])

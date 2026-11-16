@@ -24,6 +24,26 @@ static class Program
                 Console.WriteLine("Layout persistence and histogram checks passed.");
                 return 0;
             }
+            if (args is ["--catalog"] or ["--catalog", _])
+            {
+                uint os = LiveScanner.DefaultOs;
+                if (args.Length == 2 && !uint.TryParse(args[1], out os))
+                    throw new ArgumentException("Enter a decimal PCM OS ID, such as 12587811.");
+                var channels = LiveScanner.Catalog(os);
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    SchemaVersion = 1, Os = os, Description = "Bundled PCM Logger definitions",
+                    PidCount = channels.Where(channel => channel.Pid.HasValue).Select(channel => channel.Pid).Distinct().Count(),
+                    RamChannelCount = channels.Count(channel => channel.RamAddress.HasValue),
+                    MaximumRecordingBytes = LiveScanner.MaximumLiveBytes, Channels = channels
+                }));
+                return 0;
+            }
+            if (args is ["--scanner-status"])
+            {
+                Console.WriteLine(ScannerReadout.Read().GetAwaiter().GetResult());
+                return 0;
+            }
             if (args is ["--serial-test", var port])
             {
                 LiveScanner.SerialTest(port).GetAwaiter().GetResult();
@@ -88,6 +108,7 @@ static class Program
             {
                 Console.Error.WriteLine("WrongWayScanner [log.hpl|log.csv]");
                 Console.Error.WriteLine("WrongWayScanner --inspect FILE | --export INPUT OUTPUT");
+                Console.Error.WriteLine("WrongWayScanner --catalog [OS] | --scanner-status");
                 Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE");
                 Console.Error.WriteLine("WrongWayScanner --tune BIN XDF | --tune-inspect BIN XDF");
                 return 2;
