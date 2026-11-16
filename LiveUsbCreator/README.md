@@ -53,8 +53,8 @@ sha256sum -c SHA256SUMS
 
 To rebuild, use the existing WrongWay Tuning Live hybrid ISO based on
 Linux Mint 21.1 Xfce, and a matching Linux suite directory containing the
-published `Scanner/WrongWayScanner`. The build needs `xorriso`,
-`squashfs-tools`, and `e2fsprogs`.
+published `Scanner/WrongWayScanner`. The build needs `xorriso`, Python 3,
+`squashfs-tools`, `e2fsprogs`, and `sfdisk`.
 
 ```sh
 sh LiveUsbCreator/build_iso.sh /path/to/WrongWay-Tuning-Live-0.4.5.iso \

@@ -58,5 +58,8 @@ printf 'WrongWay Tuning Live %s (Linux Mint 21.1 Xfce base)\n' "$version" > "$wo
     -map "$work/info" /.disk/info \
     -boot_image any replay -append_partition 3 0x83 "$work/writable.ext4" -commit -end
 
+python3 "$assets/trim_iso_padding.py" "$work/image.iso"
+sfdisk --verify "$work/image.iso"
+
 # Link into place only after xorriso has finished, while refusing any overwrite.
 ln -- "$work/image.iso" "$output"
