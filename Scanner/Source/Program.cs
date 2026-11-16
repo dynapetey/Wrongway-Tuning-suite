@@ -58,7 +58,7 @@ static class Program
                 Console.WriteLine("Linux serial loopback passed.");
                 return 0;
             }
-            if (args is [var probe, var device] && probe is "--probe-gt" or "--identify-gt")
+            if (args is [var probe, var device] && probe is "--probe-gt" or "--identify-gt" or "--discover-gt")
             {
                 using var cancellation = new CancellationTokenSource();
                 Console.CancelKeyPress += (_, eventArgs) =>
@@ -66,6 +66,13 @@ static class Program
                     eventArgs.Cancel = true;
                     cancellation.Cancel();
                 };
+                if (probe == "--discover-gt")
+                {
+                    var discovery = HammerdroidProbe.DiscoverPids(device, Console.Error.WriteLine, cancellation.Token)
+                        .GetAwaiter().GetResult();
+                    Console.WriteLine(JsonSerializer.Serialize(discovery));
+                    return 0;
+                }
                 var result = HammerdroidProbe.Inspect(device, probe == "--identify-gt",
                     Console.Error.WriteLine, cancellation.Token).GetAwaiter().GetResult();
                 Console.WriteLine(JsonSerializer.Serialize(result));
@@ -117,7 +124,7 @@ static class Program
                 Console.Error.WriteLine("WrongWayScanner [log.hpl|log.csv]");
                 Console.Error.WriteLine("WrongWayScanner --inspect FILE | --export INPUT OUTPUT");
                 Console.Error.WriteLine("WrongWayScanner --catalog [OS] | --scanner-status");
-                Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE");
+                Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE | --discover-gt DEVICE");
                 Console.Error.WriteLine("WrongWayScanner --tune BIN XDF | --tune-inspect BIN XDF");
                 return 2;
             }

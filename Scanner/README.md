@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.8
+# WrongWay Scanner + Hammerdroid 0.4.9
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -78,6 +78,15 @@ hardware revision, serial number, and OBD port voltage. Choose
 If the PCM does not answer, the adapter details remain visible. The app
 returns the GT to ELM mode and releases the port after the probe. **Stop**
 cancels an active operation.
+
+Use **Scan → Read ECM PIDs** with the ignition on to read the ECM's SAE
+support bitmaps and check the bundled GM enhanced PID definitions for the
+identified OS. After the scan, **ECM-supported** shows the reported or
+responding PIDs. The catalog remains available when you clear the filter.
+Reported PIDs without decoding definitions appear as **Unmapped ECM PID**.
+A scan checks known enhanced PIDs and can take about a minute. **Stop**
+cancels the scan and releases the adapter. Discovery does not record data
+or modify the ECM.
 
 Select **WrongWayP59**, **Basics**, **FuelTrims**, or **Custom** and click
 **Record**. Use **Edit live channels** to build a custom profile. Pick PIDs
@@ -180,6 +189,7 @@ scanner layout.
 ./WrongWayScanner --tune-inspect "/path/to/tune.bin" "/path/to/definition.xdf"
 ./WrongWayScanner --probe-gt /dev/ttyUSB0
 ./WrongWayScanner --identify-gt /dev/rfcomm0
+./WrongWayScanner --discover-gt /dev/ttyUSB0
 python3 Tests/test_gt.py ./WrongWayScanner
 ./WrongWayScanner --inspect "/path/to/your-log.hpl"
 ./WrongWayScanner --export "/path/to/your-log.hpl" "/path/to/new-log.csv"

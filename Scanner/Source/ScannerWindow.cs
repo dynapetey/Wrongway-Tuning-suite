@@ -24,6 +24,7 @@ sealed partial class ScannerWindow : Window
     private readonly TextBlock clock = new();
     private readonly TextBox filter = new() { Watermark = "Find a channel or PID" };
     private readonly CheckBox recordedOnly = new() { Content = "Recorded only", MinHeight = 22 };
+    private readonly CheckBox ecmOnly = new() { Content = "ECM-supported", MinHeight = 22, IsEnabled = false };
     private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
     private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
@@ -42,6 +43,7 @@ sealed partial class ScannerWindow : Window
     private readonly Button mathsButton;
     private readonly Button recordButton;
     private readonly Button codesButton;
+    private readonly Button discoverPidsButton;
     private readonly Button gtButton;
     private readonly Button pcmToolsButton;
     private readonly Button refreshPorts;
@@ -57,6 +59,7 @@ sealed partial class ScannerWindow : Window
     private bool busy;
     private bool pcmToolsOpen;
     private uint? lastIdentifiedOs;
+    private GtPidDiscovery? pidDiscovery;
     private long cursor;
     private long playOrigin;
 
@@ -87,6 +90,7 @@ sealed partial class ScannerWindow : Window
         widebandButton = Button("Wideband AFR", async () => await ShowWideband());
         recordButton = Button("Record", Record, DeskUi.Record);
         codesButton = Button("Read DTCs", async () => await ReadCodes());
+        discoverPidsButton = Button("Read ECM PIDs", DiscoverPids);
         stopButton = Button("Stop", () => hardware?.Cancel(), DeskUi.Stop);
         playButton = Button("Play", TogglePlayback);
         var zoomOut = Button("Full view", FitView);
@@ -119,7 +123,8 @@ sealed partial class ScannerWindow : Window
                 DeskUi.Menu("_File", DeskUi.Action("Open log", openButton), DeskUi.Action("Export CSV", exportButton),
                     DeskUi.Action("Tune BIN", tuneButton)),
                 DeskUi.Menu("_Scan", DeskUi.Action("Record", recordButton), DeskUi.Action("Stop", stopButton),
-                    DeskUi.Action("Read DTCs", codesButton), DeskUi.Action("Find ports", refreshPorts)),
+                    DeskUi.Action("Read DTCs", codesButton), DeskUi.Action("Read ECM PIDs", discoverPidsButton),
+                    DeskUi.Action("Find ports", refreshPorts)),
                 DeskUi.Menu("_View", gaugeMenu, DeskUi.Action("Histogram graph", histogramButton),
                     DeskUi.Action("Fit time chart", zoomOut)),
                 DeskUi.Menu("_Layout", DeskUi.Action("Gauges…", editGauges), DeskUi.Action("Histogram graph…", editGraph),
@@ -133,7 +138,7 @@ sealed partial class ScannerWindow : Window
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,
             histogramButton, mathsButton, widebandButton, tuneButton);
-        var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton,
+        var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton, discoverPidsButton,
             DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
@@ -142,7 +147,7 @@ sealed partial class ScannerWindow : Window
         sidebar.ContextMenu = new ContextMenu { Items = { DeskUi.Action("Edit display channels…", editChannels), DeskUi.Action("Edit live channels…", editLive) } };
         filter.Margin = new Thickness(5);
         Put(sidebar, filter, 1);
-        Put(sidebar, DeskUi.Strip(recordedOnly), 2);
+        Put(sidebar, DeskUi.Strip(Row(recordedOnly, ecmOnly)), 2);
         Put(sidebar, new ScrollViewer { Content = channelList,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, 3);
         Put(sidebar, DeskUi.Strip(channelCount), 4);
@@ -226,6 +231,8 @@ sealed partial class ScannerWindow : Window
         };
         filter.TextChanged += (_, _) => PopulateChannels();
         recordedOnly.IsCheckedChanged += (_, _) => PopulateChannels();
+        ecmOnly.IsCheckedChanged += (_, _) => PopulateChannels();
+        port.TextChanged += (_, _) => ClearPidDiscovery();
         KeyDown += async (_, args) =>
         {
             if (args.Key == Key.O && args.KeyModifiers.HasFlag(KeyModifiers.Control))
@@ -466,28 +473,87 @@ sealed partial class ScannerWindow : Window
 
     private void AddCatalogChannels(string search)
     {
-        channelList.Children.Add(DeskUi.Strip(DeskUi.Section($"PCM OS {liveOs} catalog")));
-        int count = 0;
-        foreach (var channel in catalog.Where(item => item.Matches(search)))
+        bool onlySupported = ecmOnly.IsChecked == true;
+        var discovery = pidDiscovery;
+        channelList.Children.Add(DeskUi.Strip(DeskUi.Section(onlySupported ? "ECM-supported PIDs" : $"PCM OS {liveOs} catalog")));
+        var rows = catalog.AsEnumerable();
+        if (discovery is not null)
         {
+            var known = catalog.Where(channel => channel.Pid.HasValue).Select(channel => channel.Pid!.Value).ToHashSet();
+            var unknown = discovery.SaePids.Concat(discovery.GmPids).Where(pid => !known.Contains(pid))
+                .Select(pid => new LiveChannelChoice("", "Unmapped ECM PID", [], 0, pid, null));
+            rows = rows.Concat(unknown);
+            if (onlySupported)
+                rows = rows.Where(channel => channel.Pid is uint pid && discovery.Supports(pid));
+        }
+        var available = rows.ToArray();
+        int count = 0;
+        foreach (var channel in available.Where(item => item.Matches(search)))
+        {
+            bool mapped = channel.Bytes > 0;
             var add = Button("+", () => EditLiveChannels(channel));
+            add.IsEnabled = mapped;
             Avalonia.Automation.AutomationProperties.SetName(add, $"Add {channel.Name} to recording profile");
-            ToolTip.SetTip(add, "Add to live recording profile");
+            ToolTip.SetTip(add, mapped ? "Add to live recording profile" : "Add a PID definition to record this channel");
             DockPanel.SetDock(add, Dock.Right);
-            var address = Text(channel.AddressLabel, 10, Muted);
+            bool supported = channel.Pid is uint pid && discovery?.Supports(pid) == true;
+            var address = Text(channel.AddressLabel, 10, supported ? Accent : Muted);
             address.Margin = new Thickness(3, 0, 6, 0);
             DockPanel.SetDock(address, Dock.Right);
             var name = Text(channel.Name, 12, DeskUi.Ink);
             name.Margin = new Thickness(5, 0, 0, 0);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
-            ToolTip.SetTip(name, $"{channel} · {string.Join(", ", channel.Units)}");
+            string details = supported ? "Confirmed by the ECM in the last scan" : "Catalog definition";
+            ToolTip.SetTip(name, mapped ? $"{channel} · {string.Join(", ", channel.Units)} · {details}"
+                : "The ECM reported this PID. A decoding definition is required for recording.");
             channelList.Children.Add(new Border
             {
                 Background = count++ % 2 == 0 ? DeskUi.Surface : DeskUi.Frame,
                 Child = new DockPanel { Children = { add, address, name } }
             });
         }
-        channelCount.Text = $"{count} of {catalog.Length} PCM channels · {displayedValues.Count} recorded";
+        channelCount.Text = onlySupported ? $"{count} channels · {discovery?.Count ?? 0} confirmed PIDs"
+            : $"{count} of {available.Length} PCM channels · {displayedValues.Count} recorded";
+    }
+
+    private void ClearPidDiscovery()
+    {
+        if (pidDiscovery is null)
+            return;
+        pidDiscovery = null;
+        ecmOnly.IsEnabled = false;
+        if (ecmOnly.IsChecked == true)
+            ecmOnly.IsChecked = false;
+        else
+            PopulateChannels();
+    }
+
+    private async Task DiscoverPids()
+    {
+        if (hardware is not null || busy || pcmToolsOpen)
+            return;
+        if (port.Text?.Trim() is not { Length: > 0 } device)
+        {
+            SetStatus("Select the OBDX Pro GT USB or Bluetooth serial port first.", true);
+            return;
+        }
+
+        ClearPidDiscovery();
+        GtPidDiscovery? result = null;
+        bool success = await RunHardware(async token =>
+        {
+            result = await HammerdroidProbe.DiscoverPids(device, PostStatus, token);
+        }, recording: false, completion: "ECM PID scan complete.");
+        if (!success || result is null || closeAfterHardware)
+            return;
+        if (result.OsId is uint os)
+            IdentifyOs(os);
+        pidDiscovery = result;
+        ecmOnly.IsEnabled = true;
+        recordedOnly.IsChecked = false;
+        ecmOnly.IsChecked = true;
+        string summary = $"ECM scan · {result.SaePids.Length} SAE PIDs · {result.GmPids.Length} of {result.GmProbed} GM PIDs replied.";
+        SetStatus(result.Warning is null ? summary : summary + " " + result.Warning, result.Warning is not null);
     }
 
     private void IdentifyOs(uint os)
@@ -497,6 +563,7 @@ sealed partial class ScannerWindow : Window
             return;
         catalog = LiveScanner.Catalog(os);
         liveOs = os;
+        ClearPidDiscovery();
         PopulateChannels();
     }
 
@@ -509,6 +576,7 @@ sealed partial class ScannerWindow : Window
         CatalogOs = liveOs,
         CatalogChannelCount = catalog.Length,
         LastIdentifiedOs = lastIdentifiedOs,
+        PidDiscovery = pidDiscovery,
         Profile = profile.SelectedItem as string,
         CustomProfileChannels = profile.SelectedItem as string == LiveScanner.Custom ? scannerLayout.LiveChannels : null,
         Frames = log?.Frames ?? 0,
@@ -991,7 +1059,7 @@ sealed partial class ScannerWindow : Window
         mathsButton.IsEnabled = !connected && !busy;
         widebandButton.IsEnabled = log is not null && !connected && !busy;
         bool adapterAvailable = !connected && !busy && !pcmToolsOpen;
-        recordButton.IsEnabled = codesButton.IsEnabled = gtButton.IsEnabled = refreshPorts.IsEnabled =
+        recordButton.IsEnabled = codesButton.IsEnabled = discoverPidsButton.IsEnabled = gtButton.IsEnabled = refreshPorts.IsEnabled =
             pcmToolsButton.IsEnabled = adapterAvailable;
         port.IsEnabled = profile.IsEnabled = !connected && !pcmToolsOpen;
         stopButton.IsEnabled = connected;

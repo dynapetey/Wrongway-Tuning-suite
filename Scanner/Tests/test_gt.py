@@ -189,3 +189,72 @@ with session('--identify-gt') as (fd, p):
     out, err = p.communicate(timeout=5)
     assert p.returncode == 0 and 'Retrying 2/3' in err, (out, err)
 print('PASS bounded retry after an unanswered PCM request.')
+
+def vpw_crc(data):
+    crc = 0xff
+    for value in data:
+        crc ^= value
+        for _ in range(8):
+            crc = ((crc << 1) ^ (0x1d if crc & 0x80 else 0)) & 255
+    return bytes([crc ^ 255])
+
+def sae_page(fd, page, pids, source=0x10, add_crc=False):
+    mask = sum(1 << (32 - (pid - page)) for pid in pids)
+    data = bytes([0x48, 0x6b, source, 0x41, page]) + mask.to_bytes(4, 'big')
+    os.write(fd, frame(8, data + (vpw_crc(data) if add_crc else b'')))
+
+catalog = json.loads(subprocess.check_output([APP, '--catalog', '12587811'], text=True))
+gm_candidates = sorted({channel['Pid'] for channel in catalog['Channels']
+                        if channel['Pid'] is not None and 0xff < channel['Pid'] <= 0xffff})
+assert len(gm_candidates) >= 3
+assert 0x1141 in gm_candidates
+with session('--discover-gt') as (fd, p):
+    elm(fd)
+    adapter(fd)
+    enable_vpw(fd)
+    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x00'))
+    sae_page(fd, 0, [1], source=0x18)
+    sae_page(fd, 0x20, [0x23])
+    sae_page(fd, 0, [0x0c, 0x11, 0x20])
+    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x20'))
+    sae_page(fd, 0x20, [0x22], add_crc=True)
+    want_pcm(fd, 10)
+    reply(fd, 10, (12587811).to_bytes(4, 'big'))
+
+    for index, pid in enumerate(gm_candidates):
+        pid_bytes = pid.to_bytes(2, 'big')
+        expect(fd, frame(0x10, b'\x6c\x10\xf0\x22' + pid_bytes + b'\x01'))
+        if pid == 0x1141:
+            os.write(fd, frame(8, b'\x6c\xf0\x10\x7f\x22\x78'))
+            os.write(fd, frame(9, b'\x6c\xf0\x10\x62' + pid_bytes + b'\x79'))
+        elif index == 0:
+            os.write(fd, frame(8, b'\x6c\xf0\x18\x62' + pid_bytes + b'\x01'))
+            os.write(fd, frame(8, b'\x6c\xf0\x10\x7f\x22\x31'))
+        elif index != 1:
+            os.write(fd, frame(8, b'\x6c\xf0\x10\x7f\x22\x31'))
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode == 0, (out, err)
+    discovery = json.loads(out)
+    assert discovery == {'OsId': 12587811, 'SaePids': [0x0c, 0x11, 0x22],
+                         'SaeComplete': True, 'GmPids': [0x1141],
+                         'GmProbed': len(gm_candidates), 'Warning': None, 'Count': 4}, discovery
+print('PASS ECM SAE pages and GM discovery, other modules ignored, timeout and negative reply excluded.')
+
+with session('--discover-gt') as (fd, p):
+    elm(fd)
+    adapter(fd)
+    enable_vpw(fd)
+    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x00'))
+    sae_page(fd, 0, [0x0c, 0x20])
+    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x20'))
+    want_pcm(fd, 10)
+    os.write(fd, frame(8, b'\x6c\xf0\x10\x7f\x3c\x22'))
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode == 0, (out, err)
+    discovery = json.loads(out)
+    assert discovery['SaePids'] == [0x0c] and not discovery['SaeComplete'], discovery
+    assert discovery['OsId'] is None and discovery['GmProbed'] == 0, discovery
+    assert 'page 0x20' in discovery['Warning'], discovery
+print('PASS incomplete SAE pages report partial support and an unidentified OS skips enhanced probing.')

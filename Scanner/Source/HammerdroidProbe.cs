@@ -10,15 +10,36 @@ sealed record GtPcm(uint OsId, string? Vin);
 sealed record GtInspection(GtAdapter Adapter, GtPcm? Pcm, string? PcmError);
 
 /// <summary>Linux transport for the identification operations in Hammerdroid's DVI/VPW client.</summary>
-sealed class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
+sealed partial class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
 {
     private readonly byte[] buffer = new byte[256];
     private int buffered;
     private int nextByte;
     private bool inDviMode;
 
-    public static async Task<GtInspection> Inspect(
-        string device, bool includePcm, Action<string> status, CancellationToken token)
+    public static Task<GtInspection> Inspect(
+        string device, bool includePcm, Action<string> status, CancellationToken token) =>
+        WithAdapter<GtInspection>(device, status, token, async (client, adapter) =>
+        {
+            if (!includePcm)
+                return new GtInspection(adapter, null, null);
+            status("Reading PCM operating system ID and VIN over VPW…");
+            GtPcm? pcm = null;
+            try
+            {
+                await client.EnableVpw();
+                pcm = new GtPcm(await client.ReadPcmOsId(status), null);
+                string vin = await client.ReadVin(status);
+                return new GtInspection(adapter, pcm with { Vin = vin }, null);
+            }
+            catch (Exception ex) when (ex is IOException or TimeoutException)
+            {
+                return new GtInspection(adapter, pcm, ex.Message);
+            }
+        });
+
+    private static async Task<T> WithAdapter<T>(string device, Action<string> status, CancellationToken token,
+        Func<HammerdroidProbe, GtAdapter, Task<T>> operation)
     {
         if (!device.StartsWith("/dev/", StringComparison.Ordinal))
             throw new IOException("Choose a Linux USB serial or RFCOMM device.");
@@ -30,20 +51,7 @@ sealed class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
         {
             status("Starting Hammerdroid’s OBDX Pro GT handshake…");
             GtAdapter adapter = await client.Initialize();
-            if (!includePcm)
-                return new GtInspection(adapter, null, null);
-            status("Reading PCM operating system ID and VIN over VPW…");
-            GtPcm? pcm = null;
-            try
-            {
-                pcm = new GtPcm(await client.ReadPcmOsId(status), null);
-                string vin = await client.ReadVin(status);
-                return new GtInspection(adapter, pcm with { Vin = vin }, null);
-            }
-            catch (Exception ex) when (ex is IOException or TimeoutException)
-            {
-                return new GtInspection(adapter, pcm, ex.Message);
-            }
+            return await operation(client, adapter);
         }
         finally
         {
@@ -92,12 +100,16 @@ sealed class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
         return new GtAdapter(name, firmware, hardware, serialNumber, measured);
     }
 
-    private async Task<uint> ReadPcmOsId(Action<string> status)
+    private async Task EnableVpw()
     {
         // Select VPW, set tester address F0, and enable network receive.
         await Command(0x31, [0x01, 0x01]);
         await Command(0x33, [0x00, 0xF0, 0x01]);
         await Command(0x31, [0x02, 0x01]);
+    }
+
+    private async Task<uint> ReadPcmOsId(Action<string> status)
+    {
         byte[] os = await ReadPcmBlock(0x0A, status);
         if (os.Length < 4)
             throw new IOException("The PCM returned an incomplete OS ID.");
@@ -157,24 +169,24 @@ sealed class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
         // GM sends 5/6/6 VIN characters, with an optional leading zero on the first block.
         int start = block == 1 && frame.Length > 5 && frame[5] == 0 ? 6 : 5;
         int end = start + (block == 1 ? 5 : 6);
-        if (frame.Length == end + 1)
-        {
-            // Some DVI configurations forward the J1850 CRC in addition to the DVI checksum.
-            byte crc = 0xFF;
-            foreach (byte value in frame.AsSpan(0, end))
-            {
-                crc ^= value;
-                for (int bit = 0; bit < 8; bit++)
-                    crc = (byte)((crc << 1) ^ ((crc & 0x80) != 0 ? 0x1D : 0));
-            }
-            if ((crc ^ 0xFF) != frame[end])
-                throw new IOException($"PCM VIN block {block:X2} has a bad VPW CRC.");
-        }
-        else if (frame.Length != end)
-        {
+        // Some DVI configurations forward the J1850 CRC in addition to the DVI checksum.
+        if (frame.Length == end + 1 && !HasVpwCrc(frame))
+            throw new IOException($"PCM VIN block {block:X2} has a bad VPW CRC.");
+        if (frame.Length != end && frame.Length != end + 1)
             throw new IOException($"PCM VIN block {block:X2} has an unexpected length.");
-        }
         return frame[start..end];
+    }
+
+    private static bool HasVpwCrc(ReadOnlySpan<byte> bytes)
+    {
+        byte crc = 0xFF;
+        foreach (byte value in bytes[..^1])
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++)
+                crc = (byte)((crc << 1) ^ ((crc & 0x80) != 0 ? 0x1D : 0));
+        }
+        return (crc ^ 0xFF) == bytes[^1];
     }
 
     private async Task<string> Elm(string command, int milliseconds)
