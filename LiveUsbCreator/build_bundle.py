@@ -84,7 +84,10 @@ def pack(base_tree, update, output):
         manifest.append(manifest_entry(efi, "bundle", base_tree / efi))
         with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_STORED) as archive:
             for name in CREATOR_FILES:
-                archive.write(source_dir / name, name)
+                if name.endswith(".cmd"):
+                    archive.writestr(name, (source_dir / name).read_text().replace("\n", "\r\n"))
+                else:
+                    archive.write(source_dir / name, name)
             for name, path in files:
                 archive.write(path, f"payload/files/{name}")
             archive.writestr("payload/files/.disk/info", "WrongWay Tuning Live 0.4.8\n")

@@ -179,7 +179,17 @@ $create.Add_Click({
             $ErrorActionPreference = 'Stop'
             . $Core
             Import-Module Storage -ErrorAction Stop
-            Install-WrongWayUsb $Target $Payload $Iso $Cache
+            $lock = [Threading.Mutex]::new($false, 'Global\WrongWayLiveUsbCreator')
+            $locked = $false
+            try {
+                try { $locked = $lock.WaitOne(0) }
+                catch [Threading.AbandonedMutexException] { $locked = $true }
+                if (-not $locked) { throw 'Another WrongWay USB creation is already running.' }
+                Install-WrongWayUsb $Target $Payload $Iso $Cache
+            } finally {
+                if ($locked) { $lock.ReleaseMutex() }
+                $lock.Dispose()
+            }
         }
         $diskList.Enabled = $refresh.Enabled = $isoText.Enabled = $browse.Enabled = $create.Enabled = $false
         $timer.Start()
