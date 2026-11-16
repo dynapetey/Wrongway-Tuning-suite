@@ -68,3 +68,9 @@ install -m 755 build/scanner/WrongWayScanner Scanner/WrongWayScanner
 
 The PCM tool uses Python Tk and the bundled Mono backend. Build instructions
 and licensing for that component are in `PCM/README.md`.
+
+## Create a live USB from Windows
+
+The Windows creator formats a selected USB drive and installs WrongWay Tuning
+Live with persistent storage. See the [creator instructions](LiveUsbCreator/README.md)
+and download the [Windows release](https://github.com/dynapetey/Wrongway-Tuning-suite/releases/tag/live-usb-creator-v0.4.8).
