@@ -4,12 +4,91 @@ using Avalonia.Controls.Primitives;
 
 namespace WrongWay;
 
+sealed record HistogramSnapshot(string XLabel, string YLabel, string ValueLabel,
+    GraphStatistic Statistic, int MinimumSamples, IReadOnlyDictionary<(double X, double Y), HistogramSamples.Cell> Cells)
+{
+    private readonly double[] xs = Cells.Keys.Select(key => key.X).Distinct().Order().ToArray();
+    private readonly double[] ys = Cells.Keys.Select(key => key.Y).Distinct().Order().ToArray();
+
+    private double? CellValue(double x, double y, int minSamples)
+    {
+        if (!Cells.TryGetValue((x, y), out var cell) || cell.Count < minSamples)
+            return null;
+        return Statistic switch
+        {
+            GraphStatistic.Count => cell.Count,
+            GraphStatistic.Minimum => cell.Minimum,
+            GraphStatistic.Maximum => cell.Maximum,
+            _ => cell.Mean
+        };
+    }
+
+    public double? Sample(double targetX, double targetY, int minSamples, bool bilinear)
+    {
+        if (xs.Length == 0 || ys.Length == 0 || !double.IsFinite(targetX) || !double.IsFinite(targetY) ||
+            targetX < xs[0] || targetX > xs[^1] || targetY < ys[0] || targetY > ys[^1])
+            return null;
+
+        if (!bilinear)
+            return CellValue(xs.MinBy(x => Math.Abs(x - targetX)), ys.MinBy(y => Math.Abs(y - targetY)), minSamples);
+
+        (int x0, int x1) = Neighbors(xs, targetX);
+        (int y0, int y1) = Neighbors(ys, targetY);
+
+        double? v00 = CellValue(xs[x0], ys[y0], minSamples);
+        double? v10 = CellValue(xs[x1], ys[y0], minSamples);
+        double? v01 = CellValue(xs[x0], ys[y1], minSamples);
+        double? v11 = CellValue(xs[x1], ys[y1], minSamples);
+        if (v00 is null || v10 is null || v01 is null || v11 is null)
+            return CellValue(xs.MinBy(x => Math.Abs(x - targetX)), ys.MinBy(y => Math.Abs(y - targetY)), minSamples);
+
+        double tx = xs[x1] == xs[x0] ? 0 : (targetX - xs[x0]) / (xs[x1] - xs[x0]);
+        double ty = ys[y1] == ys[y0] ? 0 : (targetY - ys[y0]) / (ys[y1] - ys[y0]);
+        double a = v00.Value * (1 - tx) + v10.Value * tx;
+        double b = v01.Value * (1 - tx) + v11.Value * tx;
+        return a * (1 - ty) + b * ty;
+    }
+
+    private static (int Lower, int Upper) Neighbors(double[] values, double target)
+    {
+        int index = Array.BinarySearch(values, target);
+        return index >= 0 ? (index, index) : (~index - 1, ~index);
+    }
+
+    public static void SelfTest()
+    {
+        var cells = new Dictionary<(double X, double Y), HistogramSamples.Cell>
+        {
+            [(1000, 40)] = new HistogramSamples.Cell().Add(0),
+            [(1000, 60)] = new HistogramSamples.Cell().Add(10),
+            [(2000, 40)] = new HistogramSamples.Cell().Add(20),
+            [(2000, 60)] = new HistogramSamples.Cell().Add(30)
+        };
+        var snapshot = new HistogramSnapshot("RPM", "kPa", "Correction", GraphStatistic.Mean, 1, cells);
+        if (snapshot.Sample(1500, 50, 1, true) != 15 ||
+            snapshot.Sample(1000, 40, 1, true) != 0 ||
+            snapshot.Sample(3000, 50, 1, false) is not null ||
+            snapshot.Sample(1500, 50, 2, true) is not null)
+            throw new InvalidDataException("Histogram correction sampling failed.");
+    }
+}
+
 sealed partial class ScannerWindow
 {
     private ContentControl histogramTable = new();
     private TextBlock histogramStatus = DeskUi.Label("", 12, Muted);
     private HistogramSamples? histogram;
     private long histogramRefresh;
+
+    internal HistogramSnapshot? CurrentHistogramSnapshot()
+    {
+        if (histogram is not { TooManyBins: false, Cells.Count: > 0 } current)
+            return null;
+        return new HistogramSnapshot(
+            current.X.DisplayLabel, current.Y.DisplayLabel, current.Value.DisplayLabel,
+            current.Settings.Statistic, current.Settings.MinimumSamples,
+            new Dictionary<(double X, double Y), HistogramSamples.Cell>(current.Cells));
+    }
 
     private void RefreshHistogram()
     {

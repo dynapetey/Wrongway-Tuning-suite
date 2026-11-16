@@ -23,6 +23,7 @@ static class Program
                 ScannerLayout.SelfTest();
                 Console.WriteLine("Layout persistence and histogram checks passed.");
                 MathChannel.SelfTest();
+                HistogramSnapshot.SelfTest();
                 Console.WriteLine("Formula, voltage units and time alignment checks passed.");
                 if (args.Length == 2)
                 {

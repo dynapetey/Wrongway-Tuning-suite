@@ -99,6 +99,7 @@ sealed partial class ScannerWindow
         SelectTraces();
         RebuildGauges();
         PopulateChannels();
+        histogram = null;
         if (instrumentTabs.SelectedIndex == 1)
             RefreshHistogram();
         SetStatus(message);

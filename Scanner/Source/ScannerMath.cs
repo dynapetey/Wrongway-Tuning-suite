@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace WrongWay;
 
@@ -16,16 +18,94 @@ sealed record MathSetting(string Name, string Unit, string Formula, bool Enabled
     {
         if (items.Length > Maximum || items.Any(item => item is null ||
             item.Name is not { Length: > 0 and <= 120 } || item.Unit is not { Length: <= 80 }) ||
-            items.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != items.Length ||
+            items.Select(item => item.Name.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() != items.Length ||
             items.Where(item => item.Id.HasValue).GroupBy(item => item.Id).Any(group => group.Count() != 1))
             return false;
         try
         {
+            var parsed = new List<(MathSetting Setting, MathFormula Formula)>(items.Length);
             foreach (var item in items)
-                _ = new MathFormula(item.Formula);
-            return true;
+                parsed.Add((item, new MathFormula(item.Formula)));
+            return !HasCycle(parsed);
         }
         catch (FormatException) { return false; }
+    }
+
+    internal static bool HasCycle(IReadOnlyList<(MathSetting Setting, MathFormula Formula)> items)
+    {
+        var byName = items.Select((item, index) => (item.Setting, index))
+            .ToDictionary(pair => pair.Setting.Name.Trim(), pair => pair.index, StringComparer.OrdinalIgnoreCase);
+        var state = new int[items.Count]; // 0 = unvisited, 1 = visiting, 2 = visited
+        for (int i = 0; i < items.Count; i++)
+            if (state[i] == 0 && Visit(i))
+                return true;
+        return false;
+
+        bool Visit(int index)
+        {
+            state[index] = 1;
+            foreach (string input in items[index].Formula.Inputs)
+            {
+                if (TryMatchSetting(input, items, byName, out int dep) &&
+                    (state[dep] == 1 || (state[dep] == 0 && Visit(dep))))
+                    return true;
+            }
+            state[index] = 2;
+            return false;
+        }
+    }
+
+    internal static bool TryMatchSetting(string token,
+        IReadOnlyList<(MathSetting Setting, MathFormula Formula)> items,
+        IReadOnlyDictionary<string, int> byName, out int index)
+    {
+        var parts = token.Split('|', 2, StringSplitOptions.TrimEntries);
+        if (byName.TryGetValue(parts[0], out index) &&
+            (parts.Length == 1 || items[index].Setting.Unit.Trim().Equals(parts[1], StringComparison.OrdinalIgnoreCase)))
+            return true;
+        index = -1;
+        return false;
+    }
+
+    public static MathSetting[] PresetsFromAssets(uint os = LiveScanner.DefaultOs)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Parameters.Math.xml");
+        if (!File.Exists(path))
+            return Defaults;
+        var results = new List<MathSetting>(Defaults);
+        var catalog = LiveScanner.Catalog(os).ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+        using var reader = XmlReader.Create(path, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+        var root = XElement.Load(reader);
+        foreach (var element in root.Elements("MathParameter"))
+        {
+            string? name = (string?)element.Attribute("name");
+            var conversion = element.Element("Conversion");
+            string? expression = (string?)conversion?.Attribute("expression");
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(expression))
+                continue;
+            string units = ((string?)conversion?.Attribute("units"))?.Trim() ?? "";
+            string xId = ((string?)element.Attribute("xParameterId"))?.Trim() ?? "";
+            string xUnit = ((string?)element.Attribute("xParameterConversion"))?.Trim() ?? "";
+            string yId = ((string?)element.Attribute("yParameterId"))?.Trim() ?? "";
+            string yUnit = ((string?)element.Attribute("yParameterConversion"))?.Trim() ?? "";
+
+            string TokenFor(string id, string unit)
+            {
+                string label = catalog.TryGetValue(id, out var choice) ? choice.Name : id;
+                return string.IsNullOrEmpty(unit) ? $"[{label}]" : $"[{label}|{unit}]";
+            }
+
+            string formula = Regex.Replace(expression.Trim(), @"\b([xy])\b", match =>
+                match.Value == "x" ? TokenFor(xId, xUnit) : TokenFor(yId, yUnit));
+            try
+            {
+                _ = new MathFormula(formula);
+                if (!results.Any(r => r.Name.Equals(name.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    results.Add(new MathSetting(name.Trim(), units, formula, true, Guid.NewGuid()));
+            }
+            catch (FormatException) { }
+        }
+        return results.ToArray();
     }
 }
 
@@ -173,15 +253,54 @@ sealed class MathChannel(Channel output, Channel[] inputs, Func<double[], double
     public static MathChannel[] Build(ScanLog log, MathSetting[] settings)
     {
         log.Channels.RemoveAll(channel => channel.IsMath);
-        var results = new List<MathChannel>();
-        int key = log.Channels.Select(channel => channel.Key).DefaultIfEmpty(-1).Max() + 1;
+        var enabled = new List<(MathSetting Setting, MathFormula Formula)>();
         foreach (var setting in settings.Where(setting => setting.Enabled))
         {
             if (log.Channels.Any(channel => channel.Name.Equals(setting.Name, StringComparison.OrdinalIgnoreCase)
                 && channel.Unit.Equals(setting.Unit, StringComparison.OrdinalIgnoreCase)))
                 continue;
-            var formula = new MathFormula(setting.Formula);
-            var sources = formula.Inputs.Select(input => Resolve(log.Channels, input)).ToArray();
+            enabled.Add((setting, new MathFormula(setting.Formula)));
+        }
+
+        var byName = enabled.Select((item, index) => (item.Setting, index))
+            .ToDictionary(pair => pair.Setting.Name.Trim(), pair => pair.index, StringComparer.OrdinalIgnoreCase);
+        var order = new List<int>(enabled.Count);
+        var state = new int[enabled.Count]; // 0 = unvisited, 1 = visiting, 2 = visited, 3 = invalid/cyclic
+
+        void Visit(int index)
+        {
+            if (state[index] != 0)
+                return;
+            state[index] = 1;
+            foreach (string input in enabled[index].Formula.Inputs)
+            {
+                if (Resolve(log.Channels, input, includeMath: false) is null &&
+                    MathSetting.TryMatchSetting(input, enabled, byName, out int dep))
+                {
+                    if (state[dep] == 0)
+                        Visit(dep);
+                    if (state[dep] is 1 or 3)
+                    {
+                        state[index] = 3;
+                        return;
+                    }
+                }
+            }
+            state[index] = 2;
+            order.Add(index);
+        }
+
+        for (int i = 0; i < enabled.Count; i++)
+            if (state[i] == 0)
+                Visit(i);
+
+        var available = new List<Channel>(log.Channels);
+        var results = new List<MathChannel>();
+        int key = log.Channels.Select(channel => channel.Key).DefaultIfEmpty(-1).Max() + 1;
+        foreach (int index in order)
+        {
+            var (setting, formula) = enabled[index];
+            var sources = formula.Inputs.Select(input => Resolve(available, input, includeMath: true)).ToArray();
             if (sources.Any(source => source is null))
                 continue;
             var output = new Channel(key++, null, setting.Name, setting.Unit) { IsMath = true, MathId = setting.Id };
@@ -189,6 +308,7 @@ sealed class MathChannel(Channel output, Channel[] inputs, Func<double[], double
             var result = new MathChannel(output, inputs, formula.Evaluate);
             result.Replay();
             results.Add(result);
+            available.Add(output);
         }
         log.Channels.AddRange(results.Select(result => result.Output));
         return results.ToArray();
@@ -196,7 +316,7 @@ sealed class MathChannel(Channel output, Channel[] inputs, Func<double[], double
 
     public Channel Output => output;
 
-    public static Channel? Resolve(IEnumerable<Channel> channels, string token)
+    public static Channel? Resolve(IEnumerable<Channel> channels, string token, bool includeMath = false)
     {
         var parts = token.Split('|', 2, StringSplitOptions.TrimEntries);
         string name = parts[0];
@@ -206,7 +326,7 @@ sealed class MathChannel(Channel output, Channel[] inputs, Func<double[], double
         bool isHex = name.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
         bool byPid = int.TryParse(isHex ? name[2..] : name,
             isHex ? NumberStyles.AllowHexSpecifier : NumberStyles.None, CultureInfo.InvariantCulture, out int pid);
-        var matches = channels.Where(channel => !channel.IsMath &&
+        var matches = channels.Where(channel => (includeMath || !channel.IsMath) &&
             (byPid ? channel.Pid == pid || pid == 7101 && voltage && channel.Pid is null &&
                 channel.Name is "A/C Pressure Sensor Input" or "A/C Pressure Sensor Voltage"
                 : channel.Name.Trim().Equals(parts[0], StringComparison.OrdinalIgnoreCase)) &&
@@ -225,20 +345,29 @@ sealed class MathChannel(Channel output, Channel[] inputs, Func<double[], double
         log.Channels.AddRange([volts, pressure, rpm]);
         volts.Readings.AddRange([new(0, 2.5), new(200, 3)]);
         rpm.Readings.AddRange([new(100, 2500), new(800, 2600)]);
-        var settings = new[] { MathSetting.Defaults[0],
+        var afrError = new MathSetting("AFR Error", "%", "(([Wideband AFR|AFR] - 14.57) / 14.57) * 100");
+        var settings = new[] { afrError, MathSetting.Defaults[0],
             new MathSetting("Test channel", "test", "if([12] > 2000, pow([7101.10], 2), 0)") };
         var calculated = Build(log, settings);
         var afr = calculated[0].Output;
+        var chained = calculated[1].Output;
         var afrSource = ChannelSource.From(log, afr);
-        var paired = calculated[1].Output;
-        if (Math.Abs(afr.Readings[0].Number!.Value - 14.57) > 1e-9 || paired.Readings[0] != new Reading(100, 6.25) ||
+        var paired = calculated[2].Output;
+        if (Math.Abs(afr.Readings[0].Number!.Value - 14.57) > 1e-9 ||
+            Math.Abs(chained.Readings[0].Number!.Value) > 1e-9 ||
+            Math.Abs(chained.Readings[1].Number!.Value - (15.57 - 14.57) / 14.57 * 100) > 1e-6 ||
+            paired.Readings[0] != new Reading(100, 6.25) ||
             paired.Readings[^1] != new Reading(800, null) || Resolve(log.Channels, "7101") is not null)
-            throw new InvalidDataException("Maths failed to resolve voltage, evaluate an expression, or mark stale input.");
+            throw new InvalidDataException("Maths failed to resolve voltage, chain math channels, or mark stale input.");
         volts.Readings.Add(new(850, 3));
+        calculated[0].Append(850);
         calculated[1].Append(850);
-        if (paired.Readings[^1] != new Reading(850, 9))
-            throw new InvalidDataException("Maths did not append a live sample.");
-        Build(log, [settings[0] with { Name = "Renamed", Formula = "[7101.10] + 1" }]);
+        calculated[2].Append(850);
+        if (paired.Readings[^1] != new Reading(850, 9) || Math.Abs(chained.Readings[^1].Number!.Value - (15.57 - 14.57) / 14.57 * 100) > 1e-6)
+            throw new InvalidDataException("Maths did not append a live chained sample.");
+        if (MathSetting.Validate([new("A", "", "[B] + 1"), new("B", "", "[A] + 1")]))
+            throw new InvalidDataException("Maths validation accepted a cyclic dependency.");
+        Build(log, [settings[1] with { Name = "Renamed", Formula = "[7101.10] + 1" }]);
         if (log.Channels.Count != 4 || log.Channels[^1].Name != "Renamed" || afrSource.Resolve(log) != log.Channels[^1])
             throw new InvalidDataException("Editing Maths left an outdated channel in the log.");
     }

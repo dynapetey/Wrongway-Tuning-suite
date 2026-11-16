@@ -102,7 +102,7 @@ sealed partial class ScannerWindow : Window
         pcmToolsMenu.IsVisible = File.Exists(PcmLauncher);
         var tuneButton = Button("Tune BIN", async () =>
         {
-            var editor = new TuneWindow { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var editor = new TuneWindow(CurrentHistogramSnapshot()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
             await editor.ShowDialog(this);
         }, DeskUi.Table);
         var gaugeMenu = new MenuItem { Header = "Gauges" };
@@ -355,6 +355,7 @@ sealed partial class ScannerWindow : Window
         Seek(next.Start);
         FitView();
         PopulateChannels();
+        histogram = null;
         if (instrumentTabs.SelectedIndex == 1)
             RefreshHistogram();
         string summary = $"{next.Frames:N0} frames   ·   {next.Channels.Count} channels   ·   {next.Duration / 1000d:0.0} s";

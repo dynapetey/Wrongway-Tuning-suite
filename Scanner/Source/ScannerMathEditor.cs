@@ -18,22 +18,19 @@ sealed partial class ScannerWindow
         if (hardware is not null || busy)
             return;
         var result = await EditList("Maths",
-            "Create named formula channels for the chart, gauges, and graph. Inputs use recorded units. Bracket a channel name or PID.",
+            "Create named formula channels for the chart, gauges, and graph. Inputs use recorded units or other math channels. Bracket a channel name or PID.",
             scannerLayout.Maths ?? MathSetting.Defaults, MathSetting.Maximum, EditMath,
-            items => items.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() == items.Count
-                ? null : "Give each math channel a unique name.");
-        if (result is not null)
-        {
-            string message = "Maths saved.";
-            if (log is { } current)
+            items =>
             {
-                int unavailable = result.Count(setting => setting.Enabled) -
-                    result.Count(setting => setting.Enabled && new MathFormula(setting.Formula).Inputs.All(
-                        input => MathChannel.Resolve(current.Channels, input) is not null));
-                if (unavailable > 0)
-                    message += $" {unavailable} formulas need channels that are missing or ambiguous in this log.";
-            }
-            ApplyLayout(scannerLayout with { Maths = result }, message);
+                if (items.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != items.Count)
+                    return "Give each math channel a unique name.";
+                return MathSetting.Validate(items.ToArray()) ? null : "Remove cyclic references or invalid formulas.";
+            });
+        if (result is not null && ApplyLayout(scannerLayout with { Maths = result }, "Maths saved.") && log is not null)
+        {
+            int unavailable = result.Count(setting => setting.Enabled) - mathChannels.Length;
+            if (unavailable > 0)
+                SetStatus($"Maths saved. {unavailable} formulas need channels that are missing or ambiguous in this log.");
         }
     }
 
@@ -44,7 +41,22 @@ sealed partial class ScannerWindow
         var formula = Field(setting?.Formula ?? "");
         formula.MaxLength = 512;
         var enabled = new CheckBox { Content = "Calculate this channel", IsChecked = setting?.Enabled ?? true };
-        var sources = log?.Channels.Where(channel => !channel.IsMath).Select(MathToken).Distinct().ToArray() ?? [];
+        var presets = MathSetting.PresetsFromAssets(liveOs);
+        var presetChoice = Choice(presets.Select(p => p.Name).ToArray(), -1);
+        presetChoice.PlaceholderText = "Load a preset (e.g. Load, IDC, Wideband AFR)";
+        presetChoice.SelectionChanged += (_, _) =>
+        {
+            if (presetChoice.SelectedIndex >= 0 && presetChoice.SelectedIndex < presets.Length)
+            {
+                var p = presets[presetChoice.SelectedIndex];
+                if (string.IsNullOrWhiteSpace(name.Text))
+                    name.Text = p.Name;
+                if (string.IsNullOrWhiteSpace(unit.Text))
+                    unit.Text = p.Unit;
+                formula.Text = p.Formula;
+            }
+        };
+        var sources = log?.Channels.Select(MathToken).Distinct().ToArray() ?? [];
         var source = Choice(sources, sources.Length > 0 ? 0 : -1);
         if (sources.Length == 0)
             source.PlaceholderText = "Open a log to list its inputs";
@@ -64,11 +76,11 @@ sealed partial class ScannerWindow
         insert.IsEnabled = sources.Length > 0;
         var hint = new TextBlock
         {
-            Text = "Use [12] for PID 12 or [name|unit] for an exact channel. Functions include abs, sqrt, min, max, pow and if. Example: ([7101.10] / 0.5) + 9.57.",
+            Text = "Use [12] for PID 12 or [name|unit] for an exact channel (including other math channels). Functions include abs, sqrt, min, max, pow and if.",
             Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5)
         };
-        var fields = DeskUi.Fields(("Name", name), ("Output units", unit), ("Formula", formula),
-            ("Recorded channel", source));
+        var fields = DeskUi.Fields(("Preset", presetChoice), ("Name", name), ("Output units", unit),
+            ("Formula", formula), ("Available channel", source));
         fields.Children.Add(insert);
         fields.Children.Add(hint);
         fields.Children.Add(enabled);
@@ -81,13 +93,13 @@ sealed partial class ScannerWindow
                 throw new FormatException("Enter a name of up to 120 characters and units of up to 80 characters.");
             _ = new MathFormula(next.Formula);
             return next;
-        }, height: 425);
+        }, height: 485);
     }
 
     private static string MathToken(Channel channel)
     {
         if (channel.Name.IndexOfAny(['[', ']', '|', '\r', '\n']) < 0 &&
-            channel.Unit.IndexOfAny(['[', ']', '\r', '\n']) < 0)
+            channel.Unit.IndexOfAny(['[', ']', '|', '\r', '\n']) < 0)
             return $"[{channel.Name}|{channel.Unit}]";
         return channel.Pid is int pid ? $"[{pid}]" : $"[{channel.Name}]";
     }

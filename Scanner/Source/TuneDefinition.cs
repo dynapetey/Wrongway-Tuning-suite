@@ -27,7 +27,7 @@ sealed record TuneParameter(
     }
 
     public TuneConversion Conversion(TuneImage image) =>
-        Equation.Evaluate(Link is null ? 0 : image.Read(Link, 0, 0));
+        Equation.Evaluate(Link is null ? 0 : image.Read(Link, 0, 0), Width, Signed, Floating);
 
     public string Format(double value, bool forEdit = false)
     {
@@ -195,7 +195,7 @@ sealed record TuneDefinition(string Title, IReadOnlyList<TuneParameter> Paramete
                 linkName = nameInMath;
             }
             var equation = new TuneEquation(equationText, linkName);
-            var conversion = equation.Evaluate(link is null ? 0 : image.Read(link, 0, 0));
+            var conversion = equation.Evaluate(link is null ? 0 : image.Read(link, 0, 0), width, (flags & 1) != 0, floating);
 
             Dictionary<(int Row, int Column), int>? overrides = null;
             foreach (XElement math in owner.Elements("MATH").Except(maths))
