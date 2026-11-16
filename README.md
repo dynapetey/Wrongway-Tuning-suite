@@ -1,6 +1,6 @@
-# WrongWay Suite 0.4.7 for Linux x86-64
+# WrongWay Suite 0.4.8 for Linux x86-64
 
-The suite combines the WrongWayScanner 0.4.7 scanner and decoded P59 BIN
+The suite combines the WrongWayScanner 0.4.8 scanner and decoded P59 BIN
 editor with a PCM window backed by PCM Hammer 2.0.0. All three use the
 dark theme.
 
@@ -31,6 +31,9 @@ bundled. The suite uses an X11 desktop, including XWayland.
 - Use **Layout** to edit gauges, histogram axes and cell statistics, time
   chart traces, display channels and the live recording profile. Save and
   load layouts as JSON to switch setups.
+- Use **Tools → Maths** to create formula channels for live and recorded
+  data. Open **Tune BIN → Edit → User Defined Parameters** to define and
+  scale calibration scalars and tables by BIN offset.
 - **Channels** opens with the catalog for P59 OS 12587811. Search by name or
   PID, or use **+** to add a channel to the recording profile.
 - `./launch.sh scanner --catalog 12587811` exports the catalog as JSON.

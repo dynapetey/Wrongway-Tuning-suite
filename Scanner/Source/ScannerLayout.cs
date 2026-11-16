@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace WrongWay;
 
-sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0)
+sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, Guid? MathId = null)
 {
     public static readonly ChannelSource Rpm = new("@rpm");
     public static readonly ChannelSource Map = new("@map");
@@ -12,6 +12,8 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0)
     {
         if (log is null)
             return null;
+        if (MathId is { } id)
+            return log.Channels.FirstOrDefault(channel => channel.MathId == id);
         return Name switch
         {
             "@rpm" => log.Find(12, "RPM") ?? log.Find(12, "Engine Speed"),
@@ -24,7 +26,7 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0)
 
     public static ChannelSource From(ScanLog log, Channel channel) =>
         new(channel.Name, channel.Unit, log.Channels.TakeWhile(item => item != channel)
-            .Count(item => item.Name == channel.Name && item.Unit == channel.Unit));
+            .Count(item => item.Name == channel.Name && item.Unit == channel.Unit), channel.MathId);
 
     public override string ToString() => Name switch
     {
@@ -82,7 +84,7 @@ sealed record LiveChannelSetting(string Id, string Unit, string Label)
 }
 
 sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, GraphSetting Graph,
-    ChannelDisplay[] Channels, LiveChannelSetting[]? LiveChannels)
+    ChannelDisplay[] Channels, LiveChannelSetting[]? LiveChannels, MathSetting[]? Maths = null)
 {
     public static ScannerLayout Default => new(
         [new(ChannelSource.Rpm, "Engine speed", GaugeKind.Dial, 0, 8000, 0),
@@ -173,7 +175,8 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
         && Channels.Select(c => c.Source).Distinct().Count() == Channels.Length
         && (LiveChannels is null || LiveChannels.Length is >= 1 and <= LiveScanner.MaximumLiveBytes
             && LiveChannels.All(c => c is not null && Text(c.Id) && Text(c.Label) && c.Unit is { Length: <= 80 })
-            && LiveChannels.Select(c => c.Id).Distinct().Count() == LiveChannels.Length);
+            && LiveChannels.Select(c => c.Id).Distinct().Count() == LiveChannels.Length)
+        && (Maths is null || MathSetting.Validate(Maths));
 
     private static bool Axis(GraphAxis? axis) => axis is not null && Source(axis.Source) &&
         double.IsFinite(axis.Width) && axis.Width > 0 && axis.Breakpoints is { Length: <= 80 }

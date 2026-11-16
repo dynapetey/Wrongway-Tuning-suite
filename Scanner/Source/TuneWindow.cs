@@ -10,7 +10,7 @@ using Avalonia.Platform.Storage;
 
 namespace WrongWay;
 
-sealed class TuneWindow : Window
+sealed partial class TuneWindow : Window
 {
     private static readonly IBrush Accent = DeskUi.Blue;
     private static readonly IBrush Muted = DeskUi.Muted;
@@ -20,7 +20,7 @@ sealed class TuneWindow : Window
     private static readonly IBrush[] Heat = Enumerable.Range(0, 16).Select(index =>
         (IBrush)new SolidColorBrush(Color.FromRgb((byte)(20 + index * 5), (byte)(41 + index * 2), (byte)(77 - index * 3)))).ToArray();
     private static readonly string[] Categories =
-        ["All", "OS", "Engine", "Engine Diag", "Trans", "Trans Diag", "Fuel Sys", "System", "Speedo"];
+        ["All", "OS", "Engine", "Engine Diag", "Trans", "Trans Diag", "Fuel Sys", "System", "Speedo", "User Defined"];
     private readonly TabStrip sections = CategoryTabs();
     private readonly TabStrip groups = CategoryTabs();
     private readonly TextBlock files = DeskUi.Label("No BIN loaded");
@@ -54,7 +54,7 @@ sealed class TuneWindow : Window
     {
         ItemsSource = new[] { "Set to", "Add", "Multiply", "Change by %" }, SelectedIndex = 0, Width = 107
     };
-    private readonly Button pickXdf, compare, save, undo, redo, apply, applyText, warnings;
+    private readonly Button pickXdf, compare, save, undo, redo, apply, applyText, warnings, userDefined;
     private readonly Border editStrip, textStrip;
     private readonly Grid mapRows, mapTop;
     private readonly Border editorPane, referencePane;
@@ -110,6 +110,7 @@ sealed class TuneWindow : Window
         undo = MakeButton("Undo", () => ChangeHistory(redoEdit: false));
         redo = MakeButton("Redo", () => ChangeHistory(redoEdit: true));
         warnings = MakeButton("Skipped XDF items", ShowSkipped);
+        userDefined = MakeButton("User Defined Parameters", EditUserParameters);
         apply = MakeButton("Apply", Apply);
         applyText = MakeButton("Apply text", ApplyText);
         entry.KeyDown += (_, args) =>
@@ -151,11 +152,12 @@ sealed class TuneWindow : Window
             {
                 DeskUi.Menu("_File", DeskUi.Action("Open BIN", open), DeskUi.Action("Load XDF", pickXdf),
                     DeskUi.Action("Save BIN copy", save)),
-                DeskUi.Menu("_Edit", DeskUi.Action("Undo", undo), DeskUi.Action("Redo", redo)),
+                DeskUi.Menu("_Edit", DeskUi.Action("Undo", undo), DeskUi.Action("Redo", redo),
+                    DeskUi.Action("User Defined Parameters", userDefined)),
                 DeskUi.Menu("_View", DeskUi.Action("Compare BIN", compare), DeskUi.Action("Skipped XDF items", warnings))
             }
         };
-        var toolbar = Row(open, pickXdf, save, compare, undo, redo, warnings);
+        var toolbar = Row(open, pickXdf, save, compare, undo, redo, userDefined, warnings);
         var header = new StackPanel { Spacing = 2, Children = { title, details } };
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
         var textLabel = DeskUi.Label("Decoded text", 12, Accent);
@@ -249,9 +251,30 @@ sealed class TuneWindow : Window
         reference = null;
         definition = null;
         lastCopy = null;
+        userParameters = [];
+        userDefinitions = [];
+        userDefinitionsReadable = true;
+        string message = "BIN validated. Load the matching XDF or open User Defined Parameters.";
+        bool warning = false;
+        try
+        {
+            userDefinitions = UserTuneParameter.Load(candidate.Os);
+            int unavailable = BuildUserParameters();
+            if (unavailable != 0)
+            {
+                message = $"{unavailable} user-defined parameters need review for this BIN.";
+                warning = true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            userDefinitionsReadable = false;
+            message = "Could not load user-defined parameters. " + ex.Message;
+            warning = true;
+        }
         UpdateGroups();
         RefreshFiles();
-        Report("BIN validated. Load the XDF for this operating system.");
+        Report(message, warning);
     }
 
     private async Task OpenXdf()
@@ -264,9 +287,11 @@ sealed class TuneWindow : Window
     private void SetDefinition(string path)
     {
         definition = TuneDefinition.Load(path, image!);
+        int unavailable = BuildUserParameters();
         UpdateGroups();
         RefreshFiles();
-        Report($"{definition.Parameters.Count} items loaded · {definition.Parameters.Count(parameter => parameter.Editable)} editable · {definition.Skipped.Count} skipped.");
+        Report($"{definition.Parameters.Count} items loaded · {definition.Parameters.Count(parameter => parameter.Editable)} editable · {definition.Skipped.Count} skipped." +
+            (unavailable == 0 ? "" : $" {unavailable} user-defined parameters need review."), unavailable != 0);
     }
 
     private async Task Compare()
@@ -324,6 +349,7 @@ sealed class TuneWindow : Window
             "transmission diagnostics" => "Trans Diag",
             "fuel system" => "Fuel Sys",
             "speedometer" or "speedo" => "Speedo",
+            "user defined" => "User Defined",
             _ => "System"
         };
     }
@@ -337,7 +363,7 @@ sealed class TuneWindow : Window
     private IEnumerable<TuneParameter> InSection()
     {
         string section = sections.SelectedItem as string ?? "All";
-        return (definition?.Parameters ?? []).Where(parameter => section == "All" || Primary(parameter) == section);
+        return AllParameters.Where(parameter => section == "All" || Primary(parameter) == section);
     }
 
     private void UpdateGroups()
@@ -606,7 +632,7 @@ sealed class TuneWindow : Window
             };
             values.Add((row, column, value));
         }
-        image.Apply(current, values, definition!.Parameters);
+        image.Apply(current, values, AllParameters);
         Paint();
         RefreshFiles();
         Report($"Applied to {values.Count} cell(s) · Stored selection {current.Format(image.Read(current, selectedRow, selectedColumn))} {current.Units}".TrimEnd());
@@ -616,7 +642,7 @@ sealed class TuneWindow : Window
     {
         if (image is null || current?.IsText != true)
             return;
-        image.ApplyText(current, decodedText.Text ?? "", definition!.Parameters);
+        image.ApplyText(current, decodedText.Text ?? "", AllParameters);
         Paint();
         RefreshFiles();
         Report($"Applied text to {current.Title}.");
@@ -688,9 +714,10 @@ sealed class TuneWindow : Window
     private void RefreshButtons()
     {
         pickXdf.IsEnabled = image is not null;
-        compare.IsEnabled = definition is not null;
+        userDefined.IsEnabled = image is not null && userDefinitionsReadable;
+        compare.IsEnabled = image is not null;
         warnings.IsEnabled = definition?.Skipped.Count > 0;
-        save.IsEnabled = definition is not null;
+        save.IsEnabled = image is not null && AllParameters.Count != 0;
         undo.IsEnabled = image?.CanUndo == true;
         redo.IsEnabled = image?.CanRedo == true;
         apply.IsEnabled = entry.IsEnabled = current?.Editable == true && !current.IsText;

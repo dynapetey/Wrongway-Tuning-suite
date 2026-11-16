@@ -12,6 +12,8 @@ sealed class Channel(int key, int? pid, string name, string unit)
 {
     public int Key { get; } = key;
     public int? Pid { get; } = pid;
+    public bool IsMath { get; init; }
+    public Guid? MathId { get; init; }
     public string Name { get; } = name;
     public string Unit { get; } = unit;
     public string Label => string.IsNullOrEmpty(Unit) ? Name : $"{Name} [{Unit}]";
@@ -51,7 +53,7 @@ sealed class Channel(int key, int? pid, string name, string unit)
     public Reading? AsOf(long time)
     {
         int index = UpperBound(time) - 1;
-        return index < 0 ? null : Readings[index];
+        return index < 0 || IsMath && time - Readings[index].Time > 500 ? null : Readings[index];
     }
 }
 

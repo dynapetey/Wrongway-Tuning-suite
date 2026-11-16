@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.7
+# WrongWay Scanner + Hammerdroid 0.4.8
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -33,11 +33,31 @@ on Wayland sessions.
 - Changes are saved automatically to `~/.config/wrongway-suite/scanner-layout.json`
   (or under `$XDG_CONFIG_HOME`). **Layout** can export, load or reset the
   settings. Drag the panel dividers to resize the workspace.
-- **Wideband AFR** adds a calculated channel from a voltage input. The starting
-  formula is volts × 2 + 9.57. Adjust the scale and offset to match your gauge.
+- **Tools → Maths** adds and edits saved calculated channels. Use them in
+  gauges, the time chart, and the histogram. The Wideband AFR shortcut
+  also lets you apply a slope and offset to a selected voltage channel.
 - **Export CSV** writes the recorded channel updates, preserving sparse fields.
   Choose a new filename. The app can reopen this CSV and other comma-delimited
   logs with a time column in seconds or milliseconds.
+
+## Scanner Maths
+
+Choose **Tools → Maths → Add**. Enter a channel name, output units and a formula.
+Use **Insert channel** to insert a recorded input, or enter a reference directly.
+
+| Reference | Input |
+| --- | --- |
+| `[12]` or `[0x000C]` | Engine speed in a log carrying the PID |
+| `[Engine Speed|RPM]` | A uniquely named input in the specified recorded unit |
+| `[7101.10]` | A/C pressure sensor input in volts |
+
+The editable **Wideband AFR** preset starts with `(([7101.10] / 0.5) + 9.57)`.
+The formula editor accepts arithmetic, comparisons, parentheses and functions
+including `abs`, `sqrt`, `min`, `max`, `pow`, `log`, `log10`, `exp`, `round` and
+`if(condition, trueValue, falseValue)`. Expressions use recorded values and
+units. If an input is missing, ambiguous or older than 500 ms, its calculated
+reading is blank. Formula settings are saved with the scanner layout. Use
+**Export CSV** to write the calculated columns alongside the raw inputs.
 
 ## Connect an OBDX Pro GT
 
@@ -137,10 +157,25 @@ Three switches with masks wider than their defined storage appear under
 **Skipped XDF items**. The tuning editor works with offline BIN files.
 PCM flashing uses a separate workflow.
 
+## User Defined Parameters
+
+With a validated P59 BIN open, select **Edit → User Defined Parameters**.
+Choose **Add** or **Edit**. Give the parameter a name and enter its BIN
+file offset, signed or unsigned storage type (or Float32), byte order,
+and units. A scalar is 1 × 1. For a contiguous row-major table, specify
+the dimensions and optionally supply comma-separated row and column labels.
+Enter a reversible conversion using `X` for the raw value, such as
+`X * 0.5 + 1`. The definition must fit in one writable calibration segment.
+
+Click **Apply** in both dialogs. The definition appears on the **User Defined**
+tab, where you can edit its decoded values and save a checksum-validated BIN
+copy. Definitions are saved per OS in `tuner-parameters-<OS>.json` beside the
+scanner layout.
+
 ## Command-line checks
 
 ```sh
-./WrongWayScanner --self-test
+./WrongWayScanner --self-test [optional-full-P59-BIN]
 ./WrongWayScanner --tune "/path/to/tune.bin" "/path/to/definition.xdf"
 ./WrongWayScanner --tune-inspect "/path/to/tune.bin" "/path/to/definition.xdf"
 ./WrongWayScanner --probe-gt /dev/ttyUSB0

@@ -8,7 +8,7 @@ using Avalonia.Media;
 
 namespace WrongWay;
 
-static class DeskUi
+static partial class DeskUi
 {
     public static readonly IBrush Frame = Brush.Parse("#181D26");
     public static readonly IBrush Surface = Brush.Parse("#12161E");

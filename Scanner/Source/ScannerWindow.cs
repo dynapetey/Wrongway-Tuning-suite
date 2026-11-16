@@ -39,6 +39,7 @@ sealed partial class ScannerWindow : Window
     private readonly Button exportButton;
     private readonly Button histogramButton;
     private readonly Button widebandButton;
+    private readonly Button mathsButton;
     private readonly Button recordButton;
     private readonly Button codesButton;
     private readonly Button gtButton;
@@ -82,6 +83,7 @@ sealed partial class ScannerWindow : Window
         openButton = Button("Open log", PickLog, DeskUi.Open);
         exportButton = Button("Export CSV", Export, DeskUi.Save);
         histogramButton = Button("Graph", ShowHistogram, DeskUi.Chart);
+        mathsButton = Button("Maths", EditMaths);
         widebandButton = Button("Wideband AFR", async () => await ShowWideband());
         recordButton = Button("Record", Record, DeskUi.Record);
         codesButton = Button("Read DTCs", async () => await ReadCodes());
@@ -126,11 +128,11 @@ sealed partial class ScannerWindow : Window
                     DeskUi.Action("Save layout as…", Button("Save layout as", SaveLayout)),
                     DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
                     DeskUi.Action("Reset to defaults…", Button("Reset layout", ResetLayout))),
-                DeskUi.Menu("_Tools", DeskUi.Action("Wideband AFR", widebandButton), pcmToolsMenu)
+                DeskUi.Menu("_Tools", DeskUi.Action("Maths", mathsButton), DeskUi.Action("Wideband AFR", widebandButton), pcmToolsMenu)
             }
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,
-            histogramButton, widebandButton, tuneButton);
+            histogramButton, mathsButton, widebandButton, tuneButton);
         var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton,
             DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
@@ -342,6 +344,7 @@ sealed partial class ScannerWindow : Window
     {
         playback.Reset();
         log = next;
+        RefreshMaths();
         sessionText.Text = next.ScannerVersion is { } version
             ? $"{next.Name}   ·   VCM Scanner {version}"
             : next.Name;
@@ -753,6 +756,18 @@ sealed partial class ScannerWindow : Window
             SetLog(next);
             SetStatus("Recording · " + next.Name);
         }
+        else
+        {
+            bool addedReading = false;
+            foreach (var channel in mathChannels)
+            {
+                bool empty = channel.Output.Readings.Count == 0;
+                channel.Append(reading.Time);
+                addedReading |= empty && channel.Output.Readings.Count != 0;
+            }
+            if (addedReading)
+                PopulateChannels();
+        }
     }
 
     private async Task ReadCodes()
@@ -972,6 +987,7 @@ sealed partial class ScannerWindow : Window
         openButton.IsEnabled = !connected && !busy;
         exportButton.IsEnabled = log is not null && !connected && !busy;
         histogramButton.IsEnabled = !busy;
+        mathsButton.IsEnabled = !connected && !busy;
         widebandButton.IsEnabled = log is not null && !connected && !busy;
         bool adapterAvailable = !connected && !busy && !pcmToolsOpen;
         recordButton.IsEnabled = codesButton.IsEnabled = gtButton.IsEnabled = refreshPorts.IsEnabled =

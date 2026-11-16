@@ -17,11 +17,18 @@ static class Program
     {
         try
         {
-            if (args is ["--self-test"])
+            if (args is ["--self-test"] or ["--self-test", _])
             {
                 Console.WriteLine($"Live profile checks passed ({LiveScanner.SelfTest()} channels).");
                 ScannerLayout.SelfTest();
                 Console.WriteLine("Layout persistence and histogram checks passed.");
+                MathChannel.SelfTest();
+                Console.WriteLine("Formula, voltage units and time alignment checks passed.");
+                if (args.Length == 2)
+                {
+                    UserTuneParameter.SelfTest(args[1]);
+                    Console.WriteLine("User-defined parameters, protected ranges and BIN checksum checks passed.");
+                }
                 return 0;
             }
             if (args is ["--catalog"] or ["--catalog", _])
