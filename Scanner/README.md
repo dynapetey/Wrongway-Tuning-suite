@@ -73,6 +73,10 @@ Supported operators and functions:
 - Built-in functions: `abs`, `sqrt`, `min`, `max`, `pow`, `log`, `log10`, `exp`, `round`, `clamp(val, lo, hi)`, `iff(cond, t, f)`, and `if(cond, t, f)`
 - Built-in VCM Telemetry presets: `Wideband AFR`, `CL Filter`, `PE Filter`, `MAF CL Error`, `MAF PE Error`, `PE FOR AFR Error`, `VVE FOR CL Error`, `VVE FOR PE Error`, `VVE FOR AFR Error`, `Combined Fuel Trim`, `Boost Pressure (psi)`, `Injector Duty Cycle`, `Dynamic Air Mass Per Sec`, `Horsepower (Estimated)`, and `Torque (Estimated)`.
 
+The eight original telemetry math XML files are bundled under
+`Assets/VCM/Maths/`. Import an individual file in **Tools → Maths**, or import
+several together with **Layout → Import VCM XML**.
+
 Formula settings are saved with the layout. Missing or ambiguous sources
 produce blank readings. Lookahead methods use future samples already in a log.
 
