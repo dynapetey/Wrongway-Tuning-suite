@@ -48,8 +48,8 @@ bundled. The suite uses an X11 desktop, including XWayland.
   to restore the default angle. **Compare BIN** supplies the reference surface.
 - Open **Tools → PCM & flashing** in the scanner to read the connected P01
   or P59. The PCM window receives the scanner's selected serial port.
-- Open **Tools → LM7 to ’95 F-150 wiring guide** to read or save the
-  bare-wire swap schematic and connector views offline.
+- Open **Tools → LM7 to ’95 F-150 wiring guide** for the one-sheet schematic
+  and detailed connector views. Both PDFs can be saved offline.
 - With an OBDX Pro GT on USB, select **OBDX**, then **Read properties** and
   **Read full backup**. Select the edited BIN for **Validate BIN**,
   **Compare with PCM** or **Test write**. The write dialog reviews the

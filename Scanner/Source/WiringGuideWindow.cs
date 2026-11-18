@@ -10,9 +10,11 @@ namespace WrongWay;
 
 sealed class WiringGuideWindow : Window
 {
-    private const string PdfName = "2006-LM7-to-1995-F150-Fuse-Block.pdf";
+    private const string GuidePdfName = "2006-LM7-to-1995-F150-Fuse-Block.pdf";
+    private const string SchematicPdfName = "WrongWay-LM7-to-F150-Wiring-Diagram.pdf";
     private static readonly string[] Pages =
     [
+        "Schematic · Full wiring diagram",
         "1 · Power distribution",
         "2 · Grounds, starter and fuel pump",
         "3 · Ford-to-GM signal splices",
@@ -75,7 +77,7 @@ sealed class WiringGuideWindow : Window
             int index = selector.SelectedIndex;
             if (index < 0)
                 return;
-            using var content = OpenResource($"page-{index + 1}.png");
+            using var content = OpenResource(index == 0 ? "schematic.png" : $"page-{index}.png");
             var nextPage = new Bitmap(content);
             var oldPage = page;
             image.Source = page = nextPage;
@@ -92,7 +94,8 @@ sealed class WiringGuideWindow : Window
             viewport.HorizontalScrollBarVisibility = fullSize ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
             SizePage(fullSize);
         };
-        save.Click += async (_, _) => await SavePdfAsync(save);
+        save.Click += async (_, _) =>
+            await SavePdfAsync(save, selector.SelectedIndex == 0 ? SchematicPdfName : GuidePdfName);
         Closed += (_, _) =>
         {
             image.Source = null;
@@ -110,21 +113,21 @@ sealed class WiringGuideWindow : Window
         image.Height = width * page.Size.Height / page.Size.Width;
     }
 
-    private async Task SavePdfAsync(Button save)
+    private async Task SavePdfAsync(Button save, string fileName)
     {
         save.IsEnabled = false;
         try
         {
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                Title = "Save wiring guide PDF",
-                SuggestedFileName = PdfName,
+                Title = "Save wiring PDF",
+                SuggestedFileName = fileName,
                 DefaultExtension = "pdf",
                 FileTypeChoices = [new FilePickerFileType("PDF document") { Patterns = ["*.pdf"] }]
             });
             if (file is null)
                 return;
-            using var source = OpenResource(PdfName);
+            using var source = OpenResource(fileName);
             await using (var destination = await file.OpenWriteAsync())
             {
                 if (destination.CanSeek)
