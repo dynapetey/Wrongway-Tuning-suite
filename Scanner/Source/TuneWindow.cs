@@ -48,7 +48,7 @@ sealed partial class TuneWindow : Window
     };
     private readonly ComboBox scope = new()
     {
-        ItemsSource = new[] { "Cell", "Row", "Column", "Whole table" }, SelectedIndex = 0, Width = 96
+        ItemsSource = new[] { "Selection", "Row", "Column", "Whole table" }, SelectedIndex = 0, Width = 116
     };
     private readonly ComboBox operation = new()
     {
@@ -135,6 +135,7 @@ sealed partial class TuneWindow : Window
                 Select(list.SelectedItem as TuneParameter);
         };
         heatMap.IsCheckedChanged += (_, _) => Paint(resetEntry: false);
+        scope.SelectionChanged += (_, _) => Guard(SelectScope);
         operation.SelectionChanged += (_, _) => RefreshEntry();
         notes = new ScrollViewer { Content = description, MaxHeight = 62, Padding = new Thickness(6) };
         Closing += async (_, args) =>
@@ -158,7 +159,10 @@ sealed partial class TuneWindow : Window
                 DeskUi.Menu("_Edit", DeskUi.Action("Undo", undo), DeskUi.Action("Redo", redo),
                     DeskUi.Action("User Defined Parameters", userDefined),
                     DeskUi.Action("Apply Histogram…", applyHistogram)),
-                DeskUi.Menu("_View", DeskUi.Action("Compare BIN", compare), DeskUi.Action("Skipped XDF items", warnings))
+                MakeTableMenu(),
+                DeskUi.Menu("_View", TableAction("Table only", () => { tableOnly = true; ArrangeEditor(); }),
+                    TableAction("Maps and table", () => { tableOnly = false; ArrangeEditor(); }),
+                    DeskUi.Action("Compare BIN", compare), DeskUi.Action("Skipped XDF items", warnings))
             }
         };
         var toolbar = Row(open, pickXdf, save, compare, undo, redo, userDefined, applyHistogram, warnings);
@@ -166,7 +170,11 @@ sealed partial class TuneWindow : Window
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
         var textLabel = DeskUi.Label("Decoded text", 12, Accent);
         AutomationProperties.SetName(decodedText, "Decoded text");
-        editStrip = DeskUi.Strip(Row(scope, operation, entry, apply, heatMap));
+        editStrip = DeskUi.Strip(new WrapPanel { Children =
+        {
+            Row(scope, operation, entry, apply),
+            new Menu { ItemsSource = new[] { TransformMenu(false), TransformMenu(true) } }, heatMap
+        }});
         textStrip = DeskUi.Strip(Row(textLabel, decodedText, applyText, textHint));
         Put(editor, DeskUi.Strip(header, DeskUi.Header), 0);
         Put(editor, editStrip, 1);
@@ -201,6 +209,8 @@ sealed partial class TuneWindow : Window
         Put(mapRows, mapBottom, 2);
         profile.PickCell = surface.PickCell = baselineSurface.PickCell =
             (row, column) => Guard(() => ChooseCell(row, column, focus: false));
+        ToolTip.SetTip(profile, "Shift-drag a data point to edit its decoded value.");
+        ToolTip.SetTip(surface, "Drag to orbit · Shift-drag a data point to edit its decoded value.");
         var workspace = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("265,5,*"), Margin = new Thickness(5)
@@ -407,7 +417,16 @@ sealed partial class TuneWindow : Window
     {
         current = parameter;
         selectedRow = selectedColumn = 0;
+        anchor = default;
+        selection = [(0, 0)];
+        dragPointer = null;
+        dragBasis = null;
+        precision = null;
+        profile.EditCell = surface.EditCell = parameter?.Editable == true && IsPlottable(parameter)
+            ? (row, col, value) => Guard(() => ChangePlottedCell(row, col, value)) : null;
         cells.Clear();
+        cellFills.Clear();
+        scope.SelectedIndex = 0;
         table.Content = null;
         table.Offset = default;
         title.Text = parameter is null ? "Calibration editor" : $"Table · {parameter.Title}";
@@ -418,12 +437,7 @@ sealed partial class TuneWindow : Window
         decodedText.IsReadOnly = parameter?.Editable != true;
         applyText.IsVisible = parameter?.Editable == true;
         cellLocation.Text = "";
-        bool charts = IsPlottable(parameter);
-        mapRows.RowDefinitions[0].Height = charts ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        mapRows.RowDefinitions[1].Height = new GridLength(charts ? 5 : 0);
-        mapTop.IsVisible = mapDivider.IsVisible = referencePane.IsVisible = charts;
-        Grid.SetColumn(editorPane, charts ? 2 : 0);
-        Grid.SetColumnSpan(editorPane, charts ? 1 : 3);
+        ArrangeEditor();
         if (parameter is null)
             RefreshEntry();
         details.Text = parameter is null
@@ -434,6 +448,16 @@ sealed partial class TuneWindow : Window
         if (parameter is not null)
             BuildTable(parameter);
         RefreshButtons();
+    }
+
+    private void ArrangeEditor()
+    {
+        bool charts = !tableOnly && IsPlottable(current);
+        mapRows.RowDefinitions[0].Height = charts ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        mapRows.RowDefinitions[1].Height = new GridLength(charts ? 5 : 0);
+        mapTop.IsVisible = mapDivider.IsVisible = referencePane.IsVisible = charts;
+        Grid.SetColumn(editorPane, charts ? 2 : 0);
+        Grid.SetColumnSpan(editorPane, charts ? 1 : 3);
     }
 
     private void BuildTable(TuneParameter parameter)
@@ -451,11 +475,11 @@ sealed partial class TuneWindow : Window
         if (isMap)
         {
             string axes = string.Join(" / ", new[] { parameter.RowUnits, parameter.ColumnUnits }.Where(unit => unit.Length > 0));
-            Put(grid, Axis(axes), 0);
+            Put(grid, Axis(axes, (-1, -1), "Select entire table"), 0);
             for (int column = 0; column < parameter.Columns; column++)
-                Put(grid, Axis(parameter.ColumnLabels[column]), 0, column + 1);
+                Put(grid, Axis(parameter.ColumnLabels[column], (-1, column), "Select column"), 0, column + 1);
             for (int row = 0; row < parameter.Rows; row++)
-                Put(grid, Axis(parameter.RowLabels[row]), row + 1);
+                Put(grid, Axis(parameter.RowLabels[row], (row, -1), "Select row"), row + 1);
         }
 
         for (int row = 0; row < parameter.Rows; row++)
@@ -466,7 +490,7 @@ sealed partial class TuneWindow : Window
             {
                 MinWidth = parameter.IsText ? 30 : isMap ? 54 : 135, Padding = new Thickness(4, 2),
                 FontSize = 11.5, MinHeight = 23, CornerRadius = new CornerRadius(0),
-                BorderThickness = new Thickness(1),
+                BorderThickness = new Thickness(1), Tag = position,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center
             };
@@ -474,6 +498,7 @@ sealed partial class TuneWindow : Window
             cells[position] = cell;
             Put(grid, cell, row + 1, column + 1);
         }
+        WireTable(grid);
         table.Content = grid;
         Paint();
     }
@@ -497,7 +522,8 @@ sealed partial class TuneWindow : Window
             catch (Exception ex) when (ex is FormatException or InvalidDataException)
             {
                 button.Content = "—";
-                button.Background = DeskUi.Frame;
+                cellFills[position] = DeskUi.Frame;
+                PaintCellSelection(position);
                 ToolTip.SetTip(button, ex.Message);
             }
         }
@@ -512,12 +538,12 @@ sealed partial class TuneWindow : Window
             var (value, baseline) = item;
             Button button = cells[position];
             bool changed = baseline is not null && baseline != value;
-            bool selected = position == (selectedRow, selectedColumn);
             int heat = shade ? (int)Math.Clamp((value - low) / range * (Heat.Length - 1), 0, Heat.Length - 1) : 0;
-            button.Content = current.Format(value);
-            button.Background = selected ? Selected : changed ? Changed : shade ? Heat[heat] :
+            button.Content = precision is int digits && current.Display == TuneFormat.Number && current.Mask == 0
+                ? value.ToString($"F{digits}", System.Globalization.CultureInfo.InvariantCulture) : current.Format(value);
+            cellFills[position] = changed ? Changed : shade ? Heat[heat] :
                 position.Row % 2 == 0 ? DeskUi.Surface : DeskUi.Frame;
-            button.BorderBrush = selected ? Accent : Brushes.Transparent;
+            PaintCellSelection(position);
             button.Foreground = changed ? Warning : DeskUi.Ink;
             ToolTip.SetTip(button, $"Value {DisplayValue(value)}  ·  Reference {(baseline is double prior ? DisplayValue(prior) : "—")}");
         }
@@ -548,9 +574,7 @@ sealed partial class TuneWindow : Window
         }
         if (resetEntry)
             RefreshEntry();
-        cellLocation.Text = $"Cell {selectedRow + 1}, {selectedColumn + 1}   ·   0x{current.AddressOf(selectedRow, selectedColumn):X}" +
-            (current.Units.Length > 0 ? $"   ·   {current.Units}" : "") +
-            (reference is null ? "   ·   Red values differ from the original" : "   ·   Red values differ from the comparison BIN");
+        RefreshCellLocation();
     }
 
     private static bool IsPlottable(TuneParameter? map) => map is { Display: TuneFormat.Number, Mask: 0 }
@@ -560,8 +584,8 @@ sealed partial class TuneWindow : Window
     {
         if (current is null || !cells.TryGetValue((row, column), out var cell))
             return;
-        (selectedRow, selectedColumn) = (row, column);
-        Paint(resetEntry: !current.IsText);
+        scope.SelectedIndex = 0;
+        SetSelection([(row, column)], (row, column), moveAnchor: true);
         if (!focus)
             cell.BringIntoView();
         else if (current.Editable && !current.IsText)
@@ -620,12 +644,8 @@ sealed partial class TuneWindow : Window
             return;
         double operand = current.ParseEdit(entry.Text ?? "", setValue: operation.SelectedIndex == 0);
         var values = new List<(int Row, int Column, double Value)>();
-        for (int row = 0; row < current.Rows; row++)
-        for (int column = 0; column < current.Columns; column++)
+        foreach (var (row, column) in selection)
         {
-            if ((scope.SelectedIndex is 0 or 1 && row != selectedRow) ||
-                (scope.SelectedIndex is 0 or 2 && column != selectedColumn))
-                continue;
             double before = operation.SelectedIndex == 0 ? 0 : image.Read(current, row, column);
             double value = operation.SelectedIndex switch
             {
@@ -636,10 +656,7 @@ sealed partial class TuneWindow : Window
             };
             values.Add((row, column, value));
         }
-        image.Apply(current, values, AllParameters);
-        Paint();
-        RefreshFiles();
-        Report($"Applied to {values.Count} cell(s) · Stored selection {current.Format(image.Read(current, selectedRow, selectedColumn))} {current.Units}".TrimEnd());
+        ApplyTableEdits(values, "Applied values");
     }
 
 
@@ -895,11 +912,13 @@ sealed partial class TuneWindow : Window
         return tabs;
     }
 
-    private static Border Axis(string text)
+    private static Border Axis(string text, (int Row, int Column) position, string action)
     {
         var label = DeskUi.Section(text);
         label.HorizontalAlignment = HorizontalAlignment.Center;
-        return new Border { Background = DeskUi.Header, Padding = new Thickness(5, 3), Child = label };
+        var header = new Border { Background = DeskUi.Header, Padding = new Thickness(5, 3), Child = label, Tag = position };
+        ToolTip.SetTip(header, action);
+        return header;
     }
 
     private static StackPanel Row(params Control[] controls)

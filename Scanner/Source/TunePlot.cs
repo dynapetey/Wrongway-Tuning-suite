@@ -32,8 +32,12 @@ sealed class TunePlot : Control
     private (int Row, int Column) selected;
     private Point start, last;
     private bool tracking, dragged;
+    private (Point Point, int Row, int Column)? editPoint;
+    private Point editCursor;
+    private double editValue;
 
     public Action<int, int>? PickCell { get; set; }
+    public Action<int, int, double>? EditCell { get; set; }
 
     public TunePlot(bool surface, double angle = .68)
     {
@@ -45,16 +49,39 @@ sealed class TunePlot : Control
             if (values is null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
                 return;
             start = last = e.GetPosition(this);
+            if (EditCell is not null && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                editPoint = Closest(start);
+                if (editPoint is not { } point)
+                    return;
+                editValue = values[point.Row, point.Column];
+                editCursor = point.Point;
+            }
             tracking = true;
             dragged = false;
             e.Pointer.Capture(this);
         };
         PointerMoved += (_, e) =>
         {
-            if (!surface || !tracking)
+            if (!tracking)
                 return;
             Point next = e.GetPosition(this);
             if (!dragged && DistanceSquared(next, start) < 16)
+                return;
+            if (editPoint is { } point)
+            {
+                double range = high - low;
+                double before = values![point.Row, point.Column];
+                if (!(range > 0))
+                    range = Math.Max(1, Math.Abs(before) * .1);
+                double span = surface ? .62 * Math.Cos(tilt) * SurfaceScale : Bounds.Height - 41;
+                editValue = before + (start.Y - next.Y) * range / span;
+                editCursor = new(point.Point.X, point.Point.Y + next.Y - start.Y);
+                dragged = true;
+                InvalidateVisual();
+                return;
+            }
+            if (!surface)
                 return;
             dragged = true;
             yaw += (next.X - last.X) * .013;
@@ -66,16 +93,17 @@ sealed class TunePlot : Control
         {
             if (!tracking)
                 return;
+            var point = editPoint;
+            editPoint = null;
             tracking = false;
             e.Pointer.Capture(null);
-            if (dragged || points.Count == 0)
-                return;
-            Point cursor = e.GetPosition(this);
-            var closest = points.MinBy(point => DistanceSquared(point.Point, cursor));
-            if (DistanceSquared(closest.Point, cursor) <= 225)
+            if (dragged && point is { } edited)
+                EditCell?.Invoke(edited.Row, edited.Column, editValue);
+            else if (!dragged && Closest(e.GetPosition(this)) is { } closest)
                 PickCell?.Invoke(closest.Row, closest.Column);
+            InvalidateVisual();
         };
-        PointerCaptureLost += (_, _) => tracking = false;
+        PointerCaptureLost += (_, _) => { tracking = false; editPoint = null; InvalidateVisual(); };
         PointerWheelChanged += (_, e) =>
         {
             if (!surface || values is null)
@@ -85,6 +113,16 @@ sealed class TunePlot : Control
             e.Handled = true;
         };
     }
+
+    private (Point Point, int Row, int Column)? Closest(Point cursor)
+    {
+        if (points.Count == 0)
+            return null;
+        var closest = points.MinBy(point => DistanceSquared(point.Point, cursor));
+        return DistanceSquared(closest.Point, cursor) <= 225 ? closest : null;
+    }
+
+    private double SurfaceScale => Math.Min(Bounds.Width * .64, Bounds.Height * 1.08) * zoom;
 
     private static double DistanceSquared(Point a, Point b)
     {
@@ -112,6 +150,14 @@ sealed class TunePlot : Control
         InvalidateVisual();
     }
 
+    public void SetSelection(int row, int column)
+    {
+        if (selected == (row, column))
+            return;
+        selected = (row, column);
+        InvalidateVisual();
+    }
+
     private double Unit(double value) => high > low ? Math.Clamp((value - low) / (high - low), 0, 1) : .5;
     private IBrush ColorAt(double value) => Palette[(int)Math.Round(Unit(value) * (Palette.Length - 1))];
 
@@ -127,6 +173,12 @@ sealed class TunePlot : Control
             DrawSurface(context, values, parameter);
         else
             DrawProfile(context, values, parameter);
+        if (editPoint is not null && dragged)
+        {
+            context.DrawEllipse(DeskUi.Blue, Selection, editCursor, 4, 4);
+            Write(context, editValue.ToString("G6", CultureInfo.InvariantCulture),
+                Math.Clamp(editCursor.X + 7, 3, Bounds.Width - 65), Math.Clamp(editCursor.Y - 14, 3, Bounds.Height - 18), DeskUi.Ink);
+        }
     }
 
     private void DrawProfile(DrawingContext context, double[,] data, TuneParameter map)
@@ -171,7 +223,7 @@ sealed class TunePlot : Control
     {
         double sin = Math.Sin(yaw), cos = Math.Cos(yaw);
         double pitch = Math.Sin(tilt), rise = Math.Cos(tilt);
-        double scale = Math.Min(Bounds.Width * .64, Bounds.Height * 1.08) * zoom;
+        double scale = SurfaceScale;
         Point Project(double x, double y, double z) => new(
             Bounds.Width * .5 + (x * cos - y * sin) * scale,
             Bounds.Height * .61 + ((x * sin + y * cos) * pitch - z * rise) * scale);

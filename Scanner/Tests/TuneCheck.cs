@@ -75,6 +75,35 @@ image.Undo();
 Check(!image.Dirty && image.Read(ve, 0, 0) == initial, "Undo batch");
 image.Redo();
 Check(image.Dirty && image.Read(ve, 0, 0) == edited, "Redo batch");
+var rect = new HashSet<(int Row, int Column)>(new TuneArea(0, 0, 2, 2).Positions());
+double Impulse((int Row, int Column) cell) => cell == (1, 1) ? 80 : 0;
+double Center(IEnumerable<(int Row, int Column, double Value)> result) =>
+    result.Single(item => (item.Row, item.Column) == (1, 1)).Value;
+Check(Center(TuneGridTools.Smooth(rect, Impulse, TuneDirection.Both)) == 20 &&
+    Center(TuneGridTools.Smooth(rect, Impulse, TuneDirection.Horizontal)) == 40 &&
+    Center(TuneGridTools.Smooth(rect, Impulse, TuneDirection.Vertical)) == 40, "Smoothing uses the unmodified source for each direction");
+var sparse = new HashSet<(int Row, int Column)> { (1, 1), (1, 2), (2, 0) };
+Check(TuneGridTools.Smooth(sparse, Impulse, TuneDirection.Horizontal).All(item => sparse.Contains((item.Row, item.Column))),
+    "Smoothing emits only selected cells");
+string[] breakpoints = ["0", "10", "40"];
+double Coordinate((int Row, int Column) cell) => cell.Column == 2 ? 40 : 0;
+Check(Center(TuneGridTools.Interpolate(rect, Coordinate, breakpoints, breakpoints, TuneDirection.Horizontal)) == 10 &&
+    Center(TuneGridTools.Interpolate(rect, Coordinate, breakpoints, breakpoints, TuneDirection.Both)) == 10,
+    "Line and surface interpolation respect uneven axis spacing");
+Reject<FormatException>(() => TuneGridTools.Interpolate(sparse, Coordinate, breakpoints, breakpoints, TuneDirection.Both).ToArray(),
+    "A sparse selection cannot define a rectangular interpolation surface");
+double ReadVe((int Row, int Column) cell) => image.Read(ve, cell.Row, cell.Column);
+string tableCopy = TuneGridTools.Copy(ve, sparse, ReadVe, true);
+var pasted = TuneGridTools.Paste(ve, tableCopy, rect, ReadVe, TunePaste.Replace).ToArray();
+Check(pasted.Length == sparse.Count && pasted.All(item => sparse.Contains((item.Row, item.Column)) &&
+    item.Value == ReadVe((item.Row, item.Column))), "Axis-aligned paste preserves values and skips unselected holes");
+var halfChange = TuneGridTools.Paste(ve, "80", rect, _ => 100, TunePaste.MultiplyHalfPercent).ToArray();
+Check(halfChange.Length == rect.Count && halfChange.All(cell => cell.Value == 90), "Half-percent paste applies half the relative change");
+double[] beforeSmooth = rect.Select(ReadVe).ToArray();
+image.Apply(ve, TuneGridTools.Smooth(rect, ReadVe, TuneDirection.Both), items);
+Check(!beforeSmooth.SequenceEqual(rect.Select(ReadVe)), "Smoothing writes a decoded edit to the P59 map");
+image.Undo();
+Check(beforeSmooth.SequenceEqual(rect.Select(ReadVe)), "Undo restores the complete smoothing batch");
 image.Apply(afr, [(0, 0, 14.5)], items);
 Near(image.Read(afr, 0, 0), 14.5, .03, "Quantized reciprocal AFR edit");
 image.Apply(flag, [(0, 0, 1 - image.Read(flag, 0, 0))], items);

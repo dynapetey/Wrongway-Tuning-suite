@@ -146,8 +146,10 @@ python3 readout-bridge.py host /private/path/scanner-readout.sock catalog
 2. Choose a category tab such as Engine, Trans or Fuel Sys. Use the second
    tab row to narrow the category or **All** to search the full XDF. The
    editor displays scaled values with XDF axis labels, units and optional
-   heat-map shading. You can edit a cell, row, column,
-   or entire table using Set to, Add, Multiply, or Change by %.
+   heat-map shading. Drag or Shift-click to select a range. Ctrl-click to
+   add or remove individual cells. Click a header to select an axis or
+   click the top-left header to select the entire table. Set, Add,
+   Multiply and Change by % apply to the selection as one undoable edit.
    Enter numeric edits in the units shown by the XDF. Enter **On** or
    **Off** for switches. Hexadecimal fields use a `0x` prefix.
    Text fields display a copyable line. For a writable text field, enter
@@ -159,6 +161,22 @@ python3 readout-bridge.py host /private/path/scanner-readout.sock catalog
    changes from the original. Hover a cell to see its reference value.
 4. Use **Undo** or **Redo** to review edits. **Save BIN copy** writes a new
    file with recalculated P59 checksums and checks the result with PCM Hammer.
+
+**Smooth** averages adjacent selected cells with extra weight on the original
+cell. **Interpolate** uses the endpoints of each contiguous row or column, or
+the four corners of a rectangular surface. Interpolation follows numeric XDF
+breakpoints when they are strictly ordered. Shift-drag a point on the current
+2D or 3D graph to edit its decoded value.
+
+The **Table** menu and right-click menu include copy, paste and paste special.
+**Copy with axes** matches pasted values by row and column labels. Blank
+clipboard cells are skipped. **Multiply by %** treats 100% as unchanged, and
+**Apply half of % change** applies half the distance from 100%. Use the Table
+menu to save or load TSV values, adjust displayed decimals, and restore a
+table from the opened BIN. With the grid focused, Ctrl+A selects all,
+Ctrl+C copies, Ctrl+Shift+C copies with axes, Ctrl+V pastes, Ctrl+Z undoes,
+Ctrl+Y redoes, Shift+arrow extends the selection and Shift+plus or minus
+adjusts selected cells by one displayed decimal step.
 
 Verified with OS 12587811 and its July 17, 2025 XDF. The editor loaded 1,303
 parameters, including all 21 text fields and the D1201 Reverse gear ratio.

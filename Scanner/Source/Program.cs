@@ -130,6 +130,7 @@ static class Program
             }
 
             StartupFile = args.FirstOrDefault();
+            LinuxClipboard.Initialize();
             return AppBuilder.Configure<ScannerApp>().UsePlatformDetect()
                 .StartWithClassicDesktopLifetime([], ShutdownMode.OnMainWindowClose);
         }

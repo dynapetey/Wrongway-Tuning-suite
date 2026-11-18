@@ -9,6 +9,7 @@
     <Compile Include="../Source/TuneImage.cs" Link="TuneImage.cs" />
     <Compile Include="../Source/TuneDefinition.cs" Link="TuneDefinition.cs" />
     <Compile Include="../Source/TuneEquation.cs" Link="TuneEquation.cs" />
+    <Compile Include="../Source/TuneGridTools.cs" Link="TuneGridTools.cs" />
     <Reference Include="PcmLibrary" HintPath="../Source/ThirdParty/PcmLibrary.dll" />
   </ItemGroup>
 </Project>
