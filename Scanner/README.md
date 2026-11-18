@@ -80,17 +80,27 @@ several together with **Layout → Import VCM XML**.
 Formula settings are saved with the layout. Missing or ambiguous sources
 produce blank readings. Lookahead methods use future samples already in a log.
 
-## VCM control frame preview
+## VCM Controls & Special Functions
 
-**Tools → VCM control preview** shows draft J1850 VPW frames for P01/P59
-special functions, including CASE learn, relay overrides, and cylinder balance.
-The same preview is available from the command line.
+Select the OBDX Pro GT port, then open **Tools → VCM Controls & Special Functions**.
+The live fan relay tests support P59 OS 12587603 and 12587811. With the ignition
+on and engine off, select Fan 1 or Fan 2 to command that relay on or off for two
+seconds. The scanner checks RPM and vehicle speed, reports the PCM response,
+and returns the relays to automatic control when the test ends or is stopped.
+**Return fans to PCM** sends that release separately. **Clear DTCs** sends
+SAE Mode $04 and verifies the PCM acknowledgement.
+
+CASE learn, fuel trim reset, fuel pump, loop, idle, AFR, spark and cylinder
+balance frames are available for offline inspection.
 
 ```sh
 ./WrongWayScanner --vcm-control-preview CrankRelearn
+./WrongWayScanner --vcm-control-live /dev/ttyACM0 Fan1On --confirm
 ```
 
-Live control requires PCM-specific frame verification and hardware testing.
+The fan relay byte layout follows the [P59 12587603 firmware disassembly](https://github.com/LegacyNsfw/12587603)
+and the corresponding handler in the 12587811 image. A PCM acknowledgement
+confirms it accepted a request. Observe the relay or fan to verify movement.
 
 ## Telemetry Hub
 

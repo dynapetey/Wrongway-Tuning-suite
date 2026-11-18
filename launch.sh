@@ -10,6 +10,7 @@ case "${1:-}" in
             '       ./launch.sh scanner --telemetry-sessions | --telemetry-export LOG.hpl OUT.json' \
             '       ./launch.sh scanner --import-vcm-xml INPUT.xml LAYOUT.json' \
             '       ./launch.sh scanner --vcm-control-preview ACTION [VALUE]' \
+            '       ./launch.sh scanner --vcm-control-live PORT ACTION --confirm' \
             '       ./launch.sh pcm [--port /dev/ttyUSB0]'
         exit 0
         ;;

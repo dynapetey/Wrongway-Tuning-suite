@@ -90,7 +90,7 @@ sealed partial class ScannerWindow : Window
         histogramButton = Button("Graph", ShowHistogram, DeskUi.Chart);
         mathsButton = Button("Maths", EditMaths);
         telemetryHubButton = Button("Telemetry Hub", OpenTelemetryHub);
-        var vcmPreview = Button("VCM control preview", OpenVcmControls);
+        var vcmControls = Button("VCM Controls", OpenVcmControls);
         widebandButton = Button("Wideband AFR", async () => await ShowWideband());
         recordButton = Button("Record", Record, DeskUi.Record);
         codesButton = Button("Read DTCs", async () => await ReadCodes());
@@ -139,7 +139,7 @@ sealed partial class ScannerWindow : Window
                     DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
                     DeskUi.Action("Reset to defaults…", Button("Reset layout", ResetLayout))),
                 DeskUi.Menu("_Tools", DeskUi.Action("Maths", mathsButton), DeskUi.Action("Wideband AFR", widebandButton),
-                    DeskUi.Action("VCM control preview…", vcmPreview),
+                    DeskUi.Action("VCM Controls & Special Functions…", vcmControls),
                     DeskUi.Action("Telemetry Hub…", telemetryHubButton),
                     pcmToolsMenu, DeskUi.Action("LM7 to ’95 F-150 wiring guide…",
                         Button("LM7 to ’95 F-150 wiring guide", () => new WiringGuideWindow().ShowDialog(this))))

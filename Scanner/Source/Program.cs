@@ -93,6 +93,25 @@ static class Program
                 Console.WriteLine(JsonSerializer.Serialize(new { Action = action.ToString(), DraftFrameHex = Convert.ToHexString(frame) }));
                 return 0;
             }
+            if (args is ["--vcm-control-live", var controlDevice, var control, "--confirm"])
+            {
+                if (!Enum.GetNames<VcmControlAction>().Any(name => name.Equals(control, StringComparison.OrdinalIgnoreCase)) ||
+                    !Enum.TryParse<VcmControlAction>(control, ignoreCase: true, out var action) ||
+                    !VcmTelemetryControls.AvailableLive(action))
+                    throw new ArgumentException("Choose Fan1On, Fan1Off, Fan2On, Fan2Off, ReleaseAllControls or ClearTroubleCodes.");
+                using var cancellation = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, eventArgs) =>
+                {
+                    eventArgs.Cancel = true;
+                    cancellation.Cancel();
+                };
+                var result = HammerdroidProbe.RunVcmControl(controlDevice, action, Console.Error.WriteLine, cancellation.Token)
+                    .GetAwaiter().GetResult();
+                Console.WriteLine(JsonSerializer.Serialize(result));
+                return 0;
+            }
+            if (args.Length > 0 && args[0] == "--vcm-control-live")
+                throw new ArgumentException("Usage: --vcm-control-live /dev/ttyACM0 ACTION --confirm");
             if (args is ["--serial-test", var port])
             {
                 LiveScanner.SerialTest(port).GetAwaiter().GetResult();

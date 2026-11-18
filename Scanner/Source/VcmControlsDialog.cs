@@ -12,9 +12,14 @@ sealed partial class ScannerWindow
 {
     private async Task OpenVcmControls()
     {
+        if (hardware is not null || busy || pcmToolsOpen)
+        {
+            SetStatus("Finish the current adapter operation before opening VCM Controls.", true);
+            return;
+        }
         var dialog = new Window
         {
-            Title = "VCM control frame preview (P01 / P59 VPW)",
+            Title = "VCM Controls & Special Functions · OBDX Pro GT",
             Width = 680,
             Height = 560,
             MinWidth = 580,
@@ -26,7 +31,8 @@ sealed partial class ScannerWindow
 
         var logBox = new SelectableTextBlock
         {
-            Text = "Offline preview · Select a control to inspect its draft VPW frame. Vehicle transmission requires verification.",
+            Text = "Fan tests run for two seconds with the engine off and ignition on. Keep clear of the fans. " +
+                "The log shows the PCM reply for each live command.",
             Foreground = DeskUi.Ink,
             FontFamily = new FontFamily("DejaVu Sans Mono"),
             FontSize = 12,
@@ -51,6 +57,61 @@ sealed partial class ScannerWindow
             }
         }
 
+        var liveButtons = new List<Button>();
+        var stop = Button("Stop", () => hardware?.Cancel());
+        stop.IsEnabled = false;
+        dialog.Closing += (_, args) =>
+        {
+            if (!stop.IsEnabled)
+                return;
+            args.Cancel = true;
+            hardware?.Cancel();
+        };
+
+        Button LiveButton(string label, VcmControlAction action)
+        {
+            var button = Button(label, async () =>
+            {
+                if (port.Text?.Trim() is not { Length: > 0 } device)
+                {
+                    AppendLog("Select the OBDX Pro GT serial port in the scanner first.");
+                    return;
+                }
+                if (action == VcmControlAction.ClearTroubleCodes && !await ConfirmClearCodes(dialog))
+                    return;
+
+                foreach (var control in liveButtons)
+                    control.IsEnabled = false;
+                stop.IsEnabled = true;
+                try
+                {
+                    AppendLog(label + " · connecting to " + device);
+                    VcmControlResult? result = null;
+                    bool success = await RunHardware(async token =>
+                    {
+                        result = await HammerdroidProbe.RunVcmControl(device, action, PostStatus, token);
+                    }, recording: false, completion: label + " complete.");
+                    if (success && result is not null)
+                    {
+                        IdentifyOs(result.OsId);
+                        AppendLog($"PCM OS {result.OsId} accepted {label} · {result.Reply}");
+                        if (result.ReleaseReply is { } release)
+                            AppendLog($"Automatic fan control restored · {release}");
+                    }
+                    else
+                        AppendLog(status.Text ?? "Adapter operation did not complete.");
+                }
+                finally
+                {
+                    stop.IsEnabled = false;
+                    foreach (var control in liveButtons)
+                        control.IsEnabled = true;
+                }
+            });
+            liveButtons.Add(button);
+            return button;
+        }
+
         var idleInput = new TextBox { Text = "800", Width = 85, Watermark = "RPM" };
         var afrInput = new TextBox { Text = "14.7", Width = 85, Watermark = "AFR" };
         var sparkInput = new TextBox { Text = "22.0", Width = 85, Watermark = "Deg" };
@@ -71,12 +132,11 @@ sealed partial class ScannerWindow
             Spacing = 6,
             Children =
             {
-                DeskUi.Section("SPECIAL FUNCTIONS & LEARNED ADAPTIVES"),
+                DeskUi.Section("SPECIAL FUNCTIONS"),
                 Row(
-                    Button("CASE Crank Variation Learn", () => PreviewControl(new(VcmControlAction.CrankRelearn))),
-                    Button("Reset Fuel Trims", () => PreviewControl(new(VcmControlAction.ClearFuelTrims))),
-                    Button("Clear DTCs", () => PreviewControl(new(VcmControlAction.ClearTroubleCodes))),
-                    Button("Release All Controls", () => PreviewControl(new(VcmControlAction.ReleaseAllControls))))
+                    LiveButton("Clear DTCs…", VcmControlAction.ClearTroubleCodes),
+                    Button("Preview CASE learn", () => PreviewControl(new(VcmControlAction.CrankRelearn))),
+                    Button("Preview fuel trim reset", () => PreviewControl(new(VcmControlAction.ClearFuelTrims))))
             }
         };
 
@@ -85,17 +145,19 @@ sealed partial class ScannerWindow
             Spacing = 6,
             Children =
             {
-                DeskUi.Section("COOLING FANS, FUEL PUMP & LOOP STATUS"),
+                DeskUi.Section("COOLING FAN RELAY TESTS"),
                 Row(
-                    Button("Fan 1 ON", () => PreviewControl(new(VcmControlAction.Fan1On))),
-                    Button("Fan 1 OFF", () => PreviewControl(new(VcmControlAction.Fan1Off))),
-                    Button("Fan 2 ON", () => PreviewControl(new(VcmControlAction.Fan2On))),
-                    Button("Fan 2 OFF", () => PreviewControl(new(VcmControlAction.Fan2Off)))),
+                    LiveButton("Fan 1 on", VcmControlAction.Fan1On),
+                    LiveButton("Fan 1 off", VcmControlAction.Fan1Off),
+                    LiveButton("Fan 2 on", VcmControlAction.Fan2On),
+                    LiveButton("Fan 2 off", VcmControlAction.Fan2Off),
+                    LiveButton("Return fans to PCM", VcmControlAction.ReleaseAllControls)),
+                DeskUi.Section("FUEL SYSTEM FRAME PREVIEWS"),
                 Row(
-                    Button("Fuel Pump ON", () => PreviewControl(new(VcmControlAction.FuelPumpOn))),
-                    Button("Fuel Pump OFF", () => PreviewControl(new(VcmControlAction.FuelPumpOff))),
-                    Button("Force Open Loop", () => PreviewControl(new(VcmControlAction.ForceOpenLoop))),
-                    Button("Force Closed Loop", () => PreviewControl(new(VcmControlAction.ForceClosedLoop))))
+                    Button("Pump on", () => PreviewControl(new(VcmControlAction.FuelPumpOn))),
+                    Button("Pump off", () => PreviewControl(new(VcmControlAction.FuelPumpOff))),
+                    Button("Open loop", () => PreviewControl(new(VcmControlAction.ForceOpenLoop))),
+                    Button("Closed loop", () => PreviewControl(new(VcmControlAction.ForceClosedLoop))))
             }
         };
 
@@ -104,7 +166,7 @@ sealed partial class ScannerWindow
             Spacing = 6,
             Children =
             {
-                DeskUi.Section("LIVE IDLE, AFR, SPARK & CYLINDER BALANCE OVERRIDES"),
+                DeskUi.Section("ENGINE CONTROL FRAME PREVIEWS"),
                 Row(
                     DeskUi.Label("Target Idle (400–2500 RPM):", 12, Muted), idleInput,
                     Button("Preview idle RPM", () =>
@@ -155,11 +217,36 @@ sealed partial class ScannerWindow
         }, DeskUi.ChartBackground), 3);
 
         var close = Button("Close", dialog.Close);
-        close.HorizontalAlignment = HorizontalAlignment.Right;
-        Put(root, close, 4);
+        var footer = Row(stop, close);
+        footer.HorizontalAlignment = HorizontalAlignment.Right;
+        Put(root, footer, 4);
 
         dialog.Content = root;
         await dialog.ShowDialog(this);
+    }
+
+    private static Task<bool> ConfirmClearCodes(Window owner)
+    {
+        var dialog = new Window
+        {
+            Title = "Clear diagnostic trouble codes?", Width = 410, Height = 155,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = BackgroundBrush, ShowInTaskbar = false, CanResize = false
+        };
+        var result = Button("Clear DTCs", () => dialog.Close(true));
+        var cancel = Button("Cancel", () => dialog.Close(false));
+        cancel.IsCancel = true;
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(14), Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = "This clears stored emissions codes and resets readiness monitors.",
+                    TextWrapping = TextWrapping.Wrap },
+                Row(result, cancel)
+            }
+        };
+        return dialog.ShowDialog<bool>(owner);
     }
 
     private async Task OpenTelemetryHub()

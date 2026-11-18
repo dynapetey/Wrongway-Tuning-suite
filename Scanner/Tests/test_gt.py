@@ -32,9 +32,9 @@ def expect(fd, value):
     assert got == value, (got.hex(), value.hex())
 
 @contextmanager
-def session(mode):
+def session(mode, *args):
     fd, slave = pty.openpty()
-    p = subprocess.Popen([APP, mode, os.ttyname(slave)], text=True,
+    p = subprocess.Popen([APP, mode, os.ttyname(slave), *args], text=True,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         yield fd, p
@@ -83,6 +83,65 @@ def want_pcm(fd, block):
 
 def reply(fd, block, value, command=8):
     os.write(fd, frame(command, bytes([0x6C, 0xF0, 0x10, 0x7C, block]) + value))
+
+def controls(fd, os_id=12587811, rpm=None):
+    elm(fd)
+    adapter(fd)
+    enable_vpw(fd)
+    want_pcm(fd, 10)
+    reply(fd, 10, os_id.to_bytes(4, 'big'))
+    if rpm is not None:
+        expect(fd, frame(0x10, bytes.fromhex('68 6A F0 01 0C')))
+        os.write(fd, frame(8, bytes.fromhex('48 6B 10 41 0C') + (rpm * 4).to_bytes(2, 'big')))
+        expect(fd, frame(0x10, bytes.fromhex('68 6A F0 01 0D')))
+        os.write(fd, frame(8, bytes.fromhex('48 6B 10 41 0D 00')))
+
+release_fans = frame(0x10, bytes.fromhex('6C 10 F0 AE 01 00 00 00 00 00 00'))
+accept_fans = frame(8, bytes.fromhex('6C F0 10 EE 01 E1'))
+for action, payload in [('Fan1On', '80 80'), ('Fan1Off', '80 00'), ('Fan2On', '40 40'), ('Fan2Off', '40 00')]:
+    with session('--vcm-control-live', action, '--confirm') as (fd, p):
+        controls(fd, rpm=0)
+        expect(fd, frame(0x10, bytes.fromhex(f'6C 10 F0 AE 01 00 00 {payload} 00 00')))
+        os.write(fd, frame(8, bytes.fromhex('6C F0 11 EE 01 E1')) + accept_fans)
+        expect(fd, release_fans)
+        os.write(fd, accept_fans)
+        expect(fd, frame(0x25))
+        out, err = p.communicate(timeout=5)
+        assert p.returncode == 0 and json.loads(out)['ReleaseReply'] == '6CF010EE01E1', (out, err)
+print('PASS four P59 fan relay commands, real PCM acknowledgement and automatic release.')
+
+for os_id, rpm, expected in [(1252075, None, 'unavailable'), (12587811, 650, 'switch the engine off')]:
+    with session('--vcm-control-live', 'Fan1On', '--confirm') as (fd, p):
+        controls(fd, os_id, rpm)
+        expect(fd, frame(0x25))
+        out, err = p.communicate(timeout=5)
+        assert p.returncode != 0 and expected in err, (out, err)
+print('PASS fan overrides are blocked for an unverified OS or a running engine.')
+
+for cancel in [False, True]:
+    with session('--vcm-control-live', 'Fan1On', '--confirm') as (fd, p):
+        controls(fd, rpm=0)
+        expect(fd, frame(0x10, bytes.fromhex('6C 10 F0 AE 01 00 00 80 80 00 00')))
+        if cancel:
+            os.write(fd, accept_fans)
+            os.kill(p.pid, signal.SIGINT)
+        else:
+            os.write(fd, frame(8, bytes.fromhex('6C F0 10 7F AE 22')))
+        expect(fd, release_fans)
+        os.write(fd, accept_fans)
+        expect(fd, frame(0x25))
+        out, err = p.communicate(timeout=5)
+        assert p.returncode != 0 and ('canceled' if cancel else 'status 0x22') in err.lower(), (out, err)
+print('PASS rejected or stopped fan commands release the relays.')
+
+with session('--vcm-control-live', 'ClearTroubleCodes', '--confirm') as (fd, p):
+    controls(fd, rpm=0)
+    expect(fd, frame(0x10, bytes.fromhex('68 6A F0 04')))
+    os.write(fd, frame(8, bytes.fromhex('48 6B 10 44')))
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode == 0 and json.loads(out)['Reply'] == '486B1044', (out, err)
+print('PASS clearing DTCs waits for the PCM Mode $44 acknowledgement.')
 
 with session('--identify-gt') as (fd, p):
     elm(fd)

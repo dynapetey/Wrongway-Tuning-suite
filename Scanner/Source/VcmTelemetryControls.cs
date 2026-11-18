@@ -55,16 +55,20 @@ static class VcmTelemetryControls
             ? config : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
         "wrongway-suite", "telemetry-sessions.json");
 
+    public static bool AvailableLive(VcmControlAction action) => action is
+        VcmControlAction.Fan1On or VcmControlAction.Fan1Off or VcmControlAction.Fan2On or
+        VcmControlAction.Fan2Off or VcmControlAction.ReleaseAllControls or VcmControlAction.ClearTroubleCodes;
+
     /// <summary>
-    /// Builds a draft J1850 VPW frame for offline comparison with verified service-tool captures.
+    /// Builds the frame for a named control. Only AvailableLive controls can be sent by the scanner.
     /// </summary>
     public static byte[] BuildVpwCommand(VcmControlRequest request)
     {
         return request.Action switch
         {
-            // CASE / Crankshaft Position Variation Learn: Mode $AE CPID $01, Bit 7 of byte 5 = 0x80
+            // CASE preview from a captured GM LS1 session. The live relearn procedure needs PID monitoring.
             VcmControlAction.CrankRelearn =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x01, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00],
+                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00],
 
             // Clear Fuel Trims / Reset Learned Adaptives: Mode $AE CPID $01, Byte 4 = 0x40 (Fuel Trim Reset bit)
             VcmControlAction.ClearFuelTrims =>
@@ -74,17 +78,10 @@ static class VcmTelemetryControls
             VcmControlAction.ClearTroubleCodes =>
                 [Priority.Functional0, 0x6A, DeviceId.Tool, Mode.ClearDiagnosticTroubleCodes],
 
-            // Cooling Fan 1 Override (Mode $AE CPID $02: discrete relay overrides, bit 0 enable, bit 1 state)
-            VcmControlAction.Fan1On =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00],
-            VcmControlAction.Fan1Off =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
-
-            // Cooling Fan 2/3 Override (Mode $AE CPID $02: bits 2-3)
-            VcmControlAction.Fan2On =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00],
-            VcmControlAction.Fan2Off =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00],
+            VcmControlAction.Fan1On => BuildFanCommand(0x80, 0x80),
+            VcmControlAction.Fan1Off => BuildFanCommand(0x80, 0x00),
+            VcmControlAction.Fan2On => BuildFanCommand(0x40, 0x40),
+            VcmControlAction.Fan2Off => BuildFanCommand(0x40, 0x00),
 
             // Fuel Pump Relay Override (Mode $AE CPID $02: bits 4-5)
             VcmControlAction.FuelPumpOn =>
@@ -110,13 +107,16 @@ static class VcmTelemetryControls
             // Cylinder Power Balance / Injector Cutout (Mode $AE CPID $06: cylinder bitmask 1..8, 0 = enable all)
             VcmControlAction.CylinderPowerBalance => BuildCylinderBalanceCommand(request.CylinderIndex ?? 0),
 
-            // Return all Mode $AE device controls to normal PCM control
-            VcmControlAction.ReleaseAllControls =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            // Clear the CPID $01 override masks to return the fan relays to PCM control.
+            VcmControlAction.ReleaseAllControls => BuildFanCommand(0x00, 0x00),
 
             _ => throw new ArgumentOutOfRangeException(nameof(request))
         };
     }
+
+    // CPID $01 uses separate enable and state bytes for both fan relays.
+    private static byte[] BuildFanCommand(byte enable, byte state) =>
+        [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x01, 0x00, 0x00, enable, state, 0x00, 0x00];
 
     private static byte[] BuildIdleRpmCommand(double rpm)
     {
@@ -300,7 +300,7 @@ static class VcmTelemetryControls
     public static void SelfTest()
     {
         byte[] caseFrame = BuildVpwCommand(new VcmControlRequest(VcmControlAction.CrankRelearn));
-        if (!caseFrame.SequenceEqual(new byte[] { 0x6C, 0x10, 0xF0, 0xAE, 0x01, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00 }))
+        if (!caseFrame.SequenceEqual(new byte[] { 0x6C, 0x10, 0xF0, 0xAE, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00 }))
             throw new InvalidDataException("CASE Crank Relearn VPW frame mismatch.");
 
         byte[] idleFrame = BuildVpwCommand(new VcmControlRequest(VcmControlAction.CommandIdleRpm, 850));
