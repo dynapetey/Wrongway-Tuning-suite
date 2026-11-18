@@ -66,7 +66,7 @@ class App(tk.Tk):
         top = tk.Frame(self, bg=SURFACE, padx=24, pady=20)
         top.pack(fill='x')
         heading = 'PCM  HAMMER' if pcm_only else 'WRONGWAY  TUNER'
-        subtitle = 'Read, verify and flash' if pcm_only else 'Custom parameters included'
+        subtitle = 'Read, verify and flash' if pcm_only else 'Custom parameters & VCM telemetry included'
         tk.Label(top, text=heading, fg=INK, bg=SURFACE, font=('DejaVu Sans', 21, 'bold')).pack(side='left')
         tk.Label(top, text='LINUX  /  P01 + P59\n' + subtitle, justify='right', fg=ACCENT, bg=SURFACE).pack(side='right')
         self.book = ttk.Notebook(self)
@@ -481,7 +481,11 @@ class App(tk.Tk):
             self.button(buttons, label, lambda operation=op: self.run_pcm(operation, self.file_options()))
         ttk.Combobox(buttons, textvariable=self.flash_mode, state='readonly', values=['Calibration only', 'Parameters only', 'OS + calibration + boot', 'Full clone', 'P59 recovery'], width=26).pack(side='left', padx=8)
         self.button(buttons, 'Review & write', self.flash)
-        other = self.bar(self.pcm, [('Read trouble codes', lambda: self.run_pcm('codes')), ('Clear trouble codes', self.clear_codes), ('Export session log', self.export_session)])
+        other = self.bar(self.pcm, [
+            ('Read trouble codes', lambda: self.run_pcm('codes')),
+            ('Clear trouble codes', self.clear_codes),
+            ('Export session log', self.export_session),
+        ])
         self.stop_button = self.button(other, 'Stop / disconnect', self.runner.cancel)
         self.progress = ttk.Progressbar(other, mode='determinate', maximum=100)
         self.progress.pack(side='right', fill='x', expand=True, padx=10)
@@ -600,7 +604,13 @@ class App(tk.Tk):
             self.append_session(event.get('message', json.dumps(event)))
 
     def make_logs(self):
-        self.bar(self.logtab, [('Open CSV', self.open_log), ('Save CSV', self.save_log), ('Add calculated channel', self.math_channel), ('RPM / MAP histogram', self.make_histogram)])
+        self.bar(self.logtab, [
+            ('Open CSV', self.open_log),
+            ('Save CSV', self.save_log),
+            ('Add calculated channel', self.math_channel),
+            ('Import .MathParameter.xml', self.import_vcm_math),
+            ('RPM / MAP histogram', self.make_histogram),
+        ])
         self.profile = tk.StringVar(value=str(ROOT / 'backend/WrongWayP59.LogProfile'))
         live = ttk.Frame(self.logtab)
         live.pack(fill='x', pady=8)
@@ -609,7 +619,7 @@ class App(tk.Tk):
         self.button(live, 'Choose profile', lambda: self.choose(self.profile, [('Profiles', '*.LogProfile *.xml')]))
         self.button(live, 'Start live log', self.start_log)
         self.button(live, 'Stop log', self.runner.cancel)
-        ttk.Label(self.logtab, text='AFR preset: (([7101.10]/.5)+9.57) • Source must be logged A/C sensor voltage.').pack(anchor='w', pady=(0, 8))
+        ttk.Label(self.logtab, text='Supports VCM telemetry time-window methods (.avg(ms), .slope(ms), .min(ms), .max(ms), .derivative(), .integral(), .delta(), .prev()) and [PID.UnitID] references.').pack(anchor='w', pady=(0, 8))
         self.live_tree = self.tree(self.logtab, ['Time', 'Values'], height=8)
         chartbar = ttk.Frame(self.logtab)
         chartbar.pack(fill='x', pady=8)
@@ -660,17 +670,43 @@ class App(tk.Tk):
             writer.writerows(self.csv_rows)
             core.atomic_save(path, stream.getvalue().encode())
 
+    def import_vcm_math(self):
+        if not self.csv_rows:
+            raise ValueError('Load a CSV first.')
+        path = filedialog.askopenfilename(title='Import HP Tuners .MathParameter.xml', filetypes=[('VCM Math Parameter', '*.MathParameter.xml *.xml'), ('All files', '*')])
+        if not path:
+            return
+        spec = logs.load_vcm_math_xml(path)
+        self.csv_headers, self.csv_rows, missing = logs.add_math(self.csv_headers, self.csv_rows, spec['name'], spec['expression'])
+        self.chart_box['values'] = self.csv_headers
+        self.chart_column.set(spec['name'])
+        self.populate_log()
+        self.plot()
+        self.status.set(f'{spec["name"]} imported from {Path(path).name} • {missing} missing/invalid rows')
+
     def math_channel(self):
         if not self.csv_rows:
             raise ValueError('Load a CSV first.')
         window = tk.Toplevel(self)
-        window.title('Calculated scanner channel')
-        window.geometry('750x260')
+        window.title('Calculated VCM telemetry channel')
+        window.geometry('780x320')
         name, formula = tk.StringVar(value='AFR'), tk.StringVar(value=logs.AFR_EXPRESSION)
-        for title, var in [('Column name', name), ('Formula • surround CSV columns with [brackets]', formula)]:
-            ttk.Label(window, text=title, padding=10).pack(anchor='w')
+        preset_var = tk.StringVar(value='Wideband AFR')
+        preset_row = ttk.Frame(window, padding=10)
+        preset_row.pack(fill='x')
+        ttk.Label(preset_row, text='VCM Telemetry Preset:').pack(side='left', padx=(0, 8))
+        preset_box = ttk.Combobox(preset_row, textvariable=preset_var, values=list(logs.VCM_TELEMETRY_PRESETS.keys()), state='readonly', width=32)
+        preset_box.pack(side='left', padx=(0, 8))
+        def load_preset(*_):
+            selected = preset_var.get()
+            if selected in logs.VCM_TELEMETRY_PRESETS:
+                name.set(selected)
+                formula.set(logs.VCM_TELEMETRY_PRESETS[selected])
+        preset_box.bind('<<ComboboxSelected>>', load_preset)
+        for title, var in [('Column name', name), ('Formula • supports [Column], [PID.UnitID], .avg(ms), .slope(ms), .derivative(), .integral(), and/or/not', formula)]:
+            ttk.Label(window, text=title, padding=(10, 4)).pack(anchor='w')
             ttk.Entry(window, textvariable=var).pack(fill='x', padx=10)
-        ttk.Label(window, text='Available: ' + ', '.join(self.csv_headers), wraplength=720, padding=10).pack(anchor='w')
+        ttk.Label(window, text='Available: ' + ', '.join(self.csv_headers), wraplength=740, padding=10).pack(anchor='w')
         def apply():
             self.csv_headers, self.csv_rows, missing = logs.add_math(self.csv_headers, self.csv_rows, name.get(), formula.get())
             self.chart_box['values'] = self.csv_headers
@@ -716,23 +752,26 @@ class App(tk.Tk):
         if not self.csv_rows:
             raise ValueError('Load a CSV first.')
         window = tk.Toplevel(self)
-        window.title('Log histogram')
-        window.geometry('800x570')
+        window.title('Log histogram with VCM cell filter')
+        window.geometry('840x610')
         options = ttk.Frame(window, padding=12)
         options.pack(fill='x')
         variables = [tk.StringVar(value=self.csv_headers[min(i, len(self.csv_headers) - 1)]) for i in range(3)]
         steps = [tk.StringVar(value='400'), tk.StringVar(value='10')]
+        filter_expr = tk.StringVar(value='')
         for i, label in enumerate(['X (RPM)', 'Y (MAP)', 'Value']):
             ttk.Label(options, text=label).grid(row=0, column=i)
             ttk.Combobox(options, textvariable=variables[i], values=self.csv_headers, state='readonly', width=25).grid(row=1, column=i, padx=5)
         for i, label in enumerate(['X bin width', 'Y bin width']):
             ttk.Label(options, text=label).grid(row=2, column=i, pady=(10, 0))
             ttk.Entry(options, textvariable=steps[i], width=15).grid(row=3, column=i)
+        ttk.Label(options, text='Filter formula (optional, >0 keeps row)').grid(row=2, column=2, pady=(10, 0))
+        ttk.Entry(options, textvariable=filter_expr, width=28).grid(row=3, column=2, padx=5)
         columns = ['x', 'y', 'count', 'mean', 'minimum', 'maximum']
         tree = self.tree(window, columns)
         result = []
         def compute():
-            result[:] = logs.histogram(self.csv_rows, *(v.get() for v in variables), *(v.get() for v in steps))
+            result[:] = logs.histogram(self.csv_rows, *(v.get() for v in variables), *(v.get() for v in steps), filter_expression=filter_expr.get() or None)
             tree.delete(*tree.get_children())
             for row in result:
                 tree.insert('', 'end', values=[format(row[col], '.7g') for col in columns])

@@ -265,6 +265,66 @@ class LogTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 logs.load_csv(path)
 
+    def test_vcm_time_window_methods_and_boolean_operators(self):
+        headers = ['Time (s)', 'Throttle Position (%)', 'Commanded Equivalence Ratio', 'DFCO Active']
+        rows = [
+            {'Time (s)': '0.0', 'Throttle Position (%)': '20', 'Commanded Equivalence Ratio': '1.00', 'DFCO Active': '0'},
+            {'Time (s)': '0.5', 'Throttle Position (%)': '20', 'Commanded Equivalence Ratio': '1.00', 'DFCO Active': '0'},
+            {'Time (s)': '1.0', 'Throttle Position (%)': '20', 'Commanded Equivalence Ratio': '1.00', 'DFCO Active': '0'},
+            {'Time (s)': '1.5', 'Throttle Position (%)': '45', 'Commanded Equivalence Ratio': '0.85', 'DFCO Active': '0'},
+        ]
+        cl_expr = logs.VCM_TELEMETRY_PRESETS['CL Filter']
+        _, out_rows, missing = logs.add_math(headers, rows, 'CL_Pass', cl_expr)
+        self.assertEqual(missing, 0)
+        # At t=0.5s, TPS is steady (slope=0), DFCO=0, EqRatio=1.00 -> CL Filter is 1
+        self.assertEqual(out_rows[1]['CL_Pass'], '1')
+        # At t=1.5s, TPS jumped and EqRatio=0.85 -> CL Filter is 0
+        self.assertEqual(out_rows[3]['CL_Pass'], '0')
+
+    def test_vcm_derivative_integral_delta_and_prev(self):
+        headers = ['Time (s)', 'Vehicle Speed (MPH)']
+        rows = [
+            {'Time (s)': '0.0', 'Vehicle Speed (MPH)': '10'},
+            {'Time (s)': '1.0', 'Vehicle Speed (MPH)': '20'},
+            {'Time (s)': '2.0', 'Vehicle Speed (MPH)': '35'},
+        ]
+        _, rows_d, _ = logs.add_math(headers, rows, 'Accel', '[Vehicle Speed (MPH).derivative()]')
+        self.assertEqual(rows_d[1]['Accel'], '10')
+        self.assertEqual(rows_d[2]['Accel'], '15')
+
+        _, rows_i, _ = logs.add_math(headers, rows, 'Dist', '[Vehicle Speed (MPH).integral()]')
+        self.assertEqual(rows_i[1]['Dist'], '15')
+        self.assertEqual(rows_i[2]['Dist'], '42.5')
+
+        _, rows_delta, _ = logs.add_math(headers, rows, 'Step', '[Vehicle Speed (MPH).delta()]')
+        self.assertEqual(rows_delta[2]['Step'], '15')
+
+        _, rows_prev, _ = logs.add_math(headers, rows, 'PrevSpeed', '[Vehicle Speed (MPH).prev()]')
+        self.assertEqual(rows_prev[2]['PrevSpeed'], '20')
+
+    def test_vcm_math_xml_import_and_filtered_histogram(self):
+        xml_text = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<MathParameter Name="CL Steady" Units="bool" '
+            'Expression="[50090.156.slope(500)] &lt; 2 and [50118.238] = 1.00" />'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            xml_path = Path(folder) / 'CL.MathParameter.xml'
+            xml_path.write_text(xml_text)
+            spec = logs.load_vcm_math_xml(xml_path)
+            self.assertEqual(spec['name'], 'CL Steady')
+            self.assertIn('< 2 and', spec['expression'])
+
+        rows = [
+            {'Time (s)': '0.0', 'RPM': '1600', 'MAP': '50', 'LTFT': '2.0', 'Throttle Position (%)': '25', 'Commanded Equivalence Ratio': '1.00'},
+            {'Time (s)': '0.5', 'RPM': '1650', 'MAP': '52', 'LTFT': '4.0', 'Throttle Position (%)': '25', 'Commanded Equivalence Ratio': '1.00'},
+            {'Time (s)': '1.0', 'RPM': '1700', 'MAP': '54', 'LTFT': '-15.0', 'Throttle Position (%)': '80', 'Commanded Equivalence Ratio': '0.82'},
+        ]
+        bins = logs.histogram(rows, 'RPM', 'MAP', 'LTFT', 400, 10, filter_expression=spec['expression'])
+        self.assertEqual(len(bins), 1)
+        self.assertEqual(bins[0]['count'], 2)
+        self.assertAlmostEqual(bins[0]['mean'], 3.0)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -12,7 +12,14 @@ namespace WrongWay;
 sealed partial class ScannerWindow
 {
     private static readonly string[] Colors = ["Mint", "Amber", "Blue", "Pink", "Lime", "Violet"];
-    private static readonly FilePickerFileType LayoutFile = new("WrongWay scanner layout") { Patterns = ["*.json"] };
+    private static readonly FilePickerFileType LayoutFile = new("WrongWay / VCM Scanner layout")
+    {
+        Patterns = ["*.json", "*.Layout.xml", "*.Graphs.xml", "*.Channels.xml", "*.MathParameter.xml", "*.xml"]
+    };
+    private static readonly FilePickerFileType VcmXmlFile = new("HP Tuners VCM Scanner XML")
+    {
+        Patterns = ["*.Layout.xml", "*.Graphs.xml", "*.Channels.xml", "*.MathParameter.xml", "*.xml"]
+    };
     private readonly UniformGrid gaugeGrid = new() { MinHeight = 96, Columns = 3 };
     private readonly List<(ScanGauge Gauge, Channel? Channel)> gauges = [];
     private readonly Dictionary<Channel, TraceSetting> traceStyles = [];
@@ -111,7 +118,7 @@ sealed partial class ScannerWindow
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save scanner layout", SuggestedFileName = "wrongway-scanner-layout",
-            DefaultExtension = "json", FileTypeChoices = [LayoutFile]
+            DefaultExtension = "json", FileTypeChoices = [new FilePickerFileType("WrongWay scanner layout") { Patterns = ["*.json"] }]
         });
         if (file?.TryGetLocalPath() is { } path)
         {
@@ -125,10 +132,46 @@ sealed partial class ScannerWindow
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Load scanner layout", FileTypeFilter = [LayoutFile]
+            Title = "Load scanner layout or HP Tuners VCM XML", FileTypeFilter = [LayoutFile]
         });
         if (files.FirstOrDefault()?.TryGetLocalPath() is { } path)
-            ApplyLayout(ScannerLayout.Load(path), "Loaded scanner layout " + Path.GetFileName(path), selectProfile: true);
+        {
+            if (path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            {
+                var updated = VcmConfigImporter.ImportLayoutXml(path, scannerLayout, log, liveOs);
+                ApplyLayout(updated, "Imported VCM Scanner XML " + Path.GetFileName(path), selectProfile: updated.LiveChannels != scannerLayout.LiveChannels);
+            }
+            else
+            {
+                ApplyLayout(ScannerLayout.Load(path), "Loaded scanner layout " + Path.GetFileName(path), selectProfile: true);
+            }
+        }
+    }
+
+    private async Task ImportVcmXml()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import HP Tuners VCM Scanner XML (Layout, Graphs, Channels, or MathParameter)",
+            AllowMultiple = true,
+            FileTypeFilter = [VcmXmlFile]
+        });
+        if (files.Count == 0)
+            return;
+        var next = scannerLayout;
+        bool changedLive = false;
+        int importedCount = 0;
+        foreach (var item in files)
+        {
+            if (item.TryGetLocalPath() is not { } path)
+                continue;
+            var beforeLive = next.LiveChannels;
+            next = VcmConfigImporter.ImportLayoutXml(path, next, log, liveOs);
+            changedLive |= next.LiveChannels != beforeLive;
+            importedCount++;
+        }
+        if (importedCount > 0)
+            ApplyLayout(next, $"Imported {importedCount} VCM Scanner XML file(s).", selectProfile: changedLive);
     }
 
     private async Task ResetLayout()
@@ -136,7 +179,10 @@ sealed partial class ScannerWindow
         var result = await Form<string>(this, "Reset scanner layout", new StackPanel { Children =
             { DeskUi.Label("Restore the default gauges, graph, traces, and channel settings.") } }, () => "reset");
         if (result is not null)
+        {
+            selectedGraphIndex = 0;
             ApplyLayout(ScannerLayout.Default, "Scanner layout reset.", selectProfile: true);
+        }
     }
 
     private async Task EditGauges()
@@ -218,7 +264,8 @@ sealed partial class ScannerWindow
 
     private async Task EditGraph()
     {
-        var previous = scannerLayout.Graph;
+        var previous = ActiveGraphSetting();
+        var labelBox = Field(previous.Label ?? "Primary Histogram");
         var x = SourcePicker(previous.X.Source);
         var y = SourcePicker(previous.Y.Source);
         var measure = SourcePicker(previous.Value, automatic: true);
@@ -228,20 +275,35 @@ sealed partial class ScannerWindow
         var yBins = Field(string.Join(", ", previous.Y.Breakpoints.Select(value => value.ToString("G", CultureInfo.InvariantCulture))));
         var statistic = Choice(Enum.GetValues<GraphStatistic>(), (int)previous.Statistic);
         var minimum = Field(previous.MinimumSamples);
-        var result = await Form(this, "Histogram graph settings", Fields(("X axis (columns)", x), ("X bin width", xWidth),
+        var filterBox = Field(previous.FilterExpression ?? "");
+        filterBox.Watermark = "Optional VCM filter, e.g. [50090.156]>22 or [CL]=1";
+        var result = await Form(this, "Histogram graph settings", Fields(
+            ("Table label", labelBox),
+            ("X axis (columns)", x), ("X bin width", xWidth),
             ("X breakpoints (optional, comma-separated)", xBins), ("Y axis (rows)", y), ("Y bin width", yWidth),
             ("Y breakpoints (optional, comma-separated)", yBins), ("Value channel", measure),
-            ("Cell statistic", statistic), ("Minimum samples per cell", minimum)), () =>
+            ("Cell statistic", statistic), ("Minimum samples per cell", minimum),
+            ("Cell filter formula (optional)", filterBox)), () =>
         {
             var xAxis = ReadAxis(x, xWidth, xBins);
             var yAxis = ReadAxis(y, yWidth, yBins);
             if (xAxis.Source == yAxis.Source || xAxis.Source.Resolve(log) is { } xChannel && xChannel == yAxis.Source.Resolve(log))
                 throw new FormatException("Choose different channels for the two axes.");
+            string? filterText = filterBox.Text?.Trim();
+            if (!string.IsNullOrEmpty(filterText))
+                _ = new MathFormula(filterText);
             return new GraphSetting(xAxis, yAxis, (measure.SelectedItem as SourceChoice)?.Source,
-                (GraphStatistic)statistic.SelectedIndex, Whole(minimum, "Minimum samples", 1, 1_000_000));
-        }, height: 665);
-        if (result is not null && ApplyLayout(scannerLayout with { Graph = result }, "Histogram layout saved."))
-            ShowHistogram();
+                (GraphStatistic)statistic.SelectedIndex, Whole(minimum, "Minimum samples", 1, 1_000_000),
+                OptionalLabel(labelBox, "Histogram"),
+                string.IsNullOrEmpty(filterText) ? null : filterText);
+        }, height: 730);
+        if (result is not null)
+        {
+            var graphs = AvailableGraphs().ToArray();
+            graphs[Math.Clamp(selectedGraphIndex, 0, graphs.Length - 1)] = result;
+            if (ApplyLayout(scannerLayout with { Graph = graphs[0], Graphs = graphs }, "Histogram layout saved."))
+                ShowHistogram();
+        }
     }
 
     private Task EditLiveChannels() => EditLiveChannels(null);
@@ -390,8 +452,8 @@ sealed partial class ScannerWindow
     private static GraphAxis ReadAxis(ComboBox source, TextBox width, TextBox breaks)
     {
         string[] tokens = (breaks.Text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length > 80)
-            throw new FormatException("Use at most 80 breakpoints per axis.");
+        if (tokens.Length > 120)
+            throw new FormatException("Use at most 120 breakpoints per axis.");
         var points = tokens.Select(token =>
         {
             if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value))

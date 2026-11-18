@@ -41,6 +41,7 @@ sealed partial class ScannerWindow : Window
     private readonly Button histogramButton;
     private readonly Button widebandButton;
     private readonly Button mathsButton;
+    private readonly Button telemetryHubButton;
     private readonly Button recordButton;
     private readonly Button codesButton;
     private readonly Button discoverPidsButton;
@@ -52,6 +53,7 @@ sealed partial class ScannerWindow : Window
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(40) };
     private readonly Stopwatch playback = new();
     private ScanLog? log;
+    private string? logPath;
     private CancellationTokenSource? hardware;
     private bool closeAfterHardware;
     private bool adjustingSlider;
@@ -76,7 +78,7 @@ sealed partial class ScannerWindow : Window
         sessionText.Foreground = Muted;
         sessionText.TextTrimming = TextTrimming.CharacterEllipsis;
         status.TextTrimming = TextTrimming.CharacterEllipsis;
-        status.Text = "Ready · open a compact HP Tuners HPL log or a CSV recording.";
+        status.Text = "Ready · open a compact HP Tuners HPL log, CSV recording, or VCM XML config.";
         status.Foreground = Muted;
         clock.Text = "0.000 s";
         clock.Foreground = Accent;
@@ -87,6 +89,8 @@ sealed partial class ScannerWindow : Window
         exportButton = Button("Export CSV", Export, DeskUi.Save);
         histogramButton = Button("Graph", ShowHistogram, DeskUi.Chart);
         mathsButton = Button("Maths", EditMaths);
+        telemetryHubButton = Button("Telemetry Hub", OpenTelemetryHub);
+        var vcmPreview = Button("VCM control preview", OpenVcmControls);
         widebandButton = Button("Wideband AFR", async () => await ShowWideband());
         recordButton = Button("Record", Record, DeskUi.Record);
         codesButton = Button("Read DTCs", async () => await ReadCodes());
@@ -130,16 +134,19 @@ sealed partial class ScannerWindow : Window
                 DeskUi.Menu("_Layout", DeskUi.Action("Gauges…", editGauges), DeskUi.Action("Histogram graph…", editGraph),
                     DeskUi.Action("Time chart…", editTraces), DeskUi.Action("Display channels…", editChannels),
                     DeskUi.Action("Live channels…", editLive),
+                    DeskUi.Action("Import VCM XML…", Button("Import VCM XML", ImportVcmXml)),
                     DeskUi.Action("Save layout as…", Button("Save layout as", SaveLayout)),
                     DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
                     DeskUi.Action("Reset to defaults…", Button("Reset layout", ResetLayout))),
                 DeskUi.Menu("_Tools", DeskUi.Action("Maths", mathsButton), DeskUi.Action("Wideband AFR", widebandButton),
+                    DeskUi.Action("VCM control preview…", vcmPreview),
+                    DeskUi.Action("Telemetry Hub…", telemetryHubButton),
                     pcmToolsMenu, DeskUi.Action("LM7 to ’95 F-150 wiring guide…",
                         Button("LM7 to ’95 F-150 wiring guide", () => new WiringGuideWindow().ShowDialog(this))))
             }
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,
-            histogramButton, mathsButton, widebandButton, tuneButton);
+            histogramButton, mathsButton, widebandButton, telemetryHubButton, tuneButton);
         var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton, discoverPidsButton,
             DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
@@ -300,7 +307,14 @@ sealed partial class ScannerWindow : Window
         SetStatus("Opening " + Path.GetFileName(path) + "…");
         try
         {
-            SetLog(await Task.Run(() => ScanLog.Load(path)));
+            var loaded = await Task.Run(() => ScanLog.Load(path));
+            logPath = path;
+            SetLog(loaded);
+            try { VcmTelemetryControls.RegisterSession(loaded, path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                SetStatus("Log opened. Telemetry session could not be indexed: " + ex.Message, true);
+            }
         }
         catch (Exception ex)
         {
@@ -571,7 +585,7 @@ sealed partial class ScannerWindow : Window
 
     private object ScannerStatus() => new
     {
-        SchemaVersion = 1,
+        SchemaVersion = 2,
         AppVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
         CapturedUtc = DateTimeOffset.UtcNow,
         Mode = modeText.Text,
@@ -586,10 +600,19 @@ sealed partial class ScannerWindow : Window
         Channels = log?.Channels.Where(channel => channel.Display?.Hidden != true).Select(channel =>
         {
             var reading = channel.AsOf(cursor);
-            return new { channel.Key, channel.Pid, Name = channel.DisplayName, Unit = channel.DisplayUnit,
+            return new { channel.Key, channel.Pid, channel.IsMath, Name = channel.DisplayName, Unit = channel.DisplayUnit,
                 Value = channel.DisplayNumber(reading),
                 SampleMilliseconds = reading is null ? (long?)null : reading.Time - log.Start };
-        }).ToArray() ?? []
+        }).ToArray() ?? [],
+        ActiveHistogram = histogram is { TooManyBins: false, Cells.Count: > 0 } current ? new
+        {
+            XLabel = current.X.DisplayLabel,
+            YLabel = current.Y.DisplayLabel,
+            ValueLabel = current.Value.DisplayLabel,
+            Statistic = current.Settings.Statistic.ToString(),
+            current.Settings.MinimumSamples,
+            BinCount = current.Cells.Count
+        } : null
     };
 
     private void Seek(long time)
@@ -798,12 +821,27 @@ sealed partial class ScannerWindow : Window
             SetStatus("Set up a custom profile in Edit live channels first.", true);
             return;
         }
+        uint? recordedOs = null;
         await RunHardware(async token =>
         {
             await LiveScanner.Record(device, selection, custom, path, PostStatus,
-                os => Dispatcher.UIThread.Post(() => IdentifyOs(os)),
+                os =>
+                {
+                    recordedOs = os;
+                    Dispatcher.UIThread.Post(() => IdentifyOs(os));
+                },
                 reading => Dispatcher.UIThread.Post(() => AppendLive(next, reading)), token);
         }, recording: true);
+        if (next.Frames > 0)
+        {
+            logPath = path;
+            SetLog(next);
+            try { VcmTelemetryControls.RegisterSession(next, path, recordedOs); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                SetStatus("Log recorded. Telemetry session could not be indexed: " + ex.Message, true);
+            }
+        }
     }
 
     private void AppendLive(ScanLog next, LiveReading reading)
@@ -1060,6 +1098,7 @@ sealed partial class ScannerWindow : Window
         histogramButton.IsEnabled = !busy;
         mathsButton.IsEnabled = !connected && !busy;
         widebandButton.IsEnabled = log is not null && !connected && !busy;
+        telemetryHubButton.IsEnabled = !busy;
         bool adapterAvailable = !connected && !busy && !pcmToolsOpen;
         recordButton.IsEnabled = codesButton.IsEnabled = discoverPidsButton.IsEnabled = gtButton.IsEnabled = refreshPorts.IsEnabled =
             pcmToolsButton.IsEnabled = adapterAvailable;

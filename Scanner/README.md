@@ -22,10 +22,15 @@ on Wayland sessions.
   the last recorded value at or before the cursor.
 - **Edit gauges** adds, removes and reorders dial, bar, and digital gauges.
   Choose each instrument's channel, label, range and color.
-- **Edit graph** sets the histogram's X, Y and value channels, fixed bin
-  widths or explicit breakpoints, mean/minimum/maximum/count, and minimum
-  samples. The histogram updates during recording. Samples are matched to
-  axis readings within 500 ms.
+- **Edit graph** sets the histogram's table label, X, Y and value channels,
+  fixed bin widths or explicit breakpoints, mean/minimum/maximum/count,
+  minimum samples, and optional VCM `FilterFunction` cell filter expression.
+  Use the **Table:** dropdown in the histogram header to switch between
+  multiple imported or saved histogram tables. The histogram updates during
+  recording and displays how many samples were excluded by the active cell filter.
+- **Layout → Import VCM XML…** imports HP Tuners VCM Scanner `*.Channels.xml`,
+  `*.Graphs.xml`, `*.Layout.xml`, and `*.MathParameter.xml` files directly into
+  the active WrongWay Scanner layout and live recording profile.
 - **Edit traces** sets the time chart order, colors and per-trace scale.
   **Channels → Edit** controls labels, units, linear conversions, precision
   and visibility. These settings change the displayed values. CSV exports
@@ -40,24 +45,68 @@ on Wayland sessions.
   Choose a new filename. The app can reopen this CSV and other comma-delimited
   logs with a time column in seconds or milliseconds.
 
-## Scanner Maths
+## Scanner Maths & VCM Telemetry Functions
 
-Choose **Tools → Maths → Add**. Enter a channel name, output units and a formula.
-Use **Insert channel** to insert a recorded input, or enter a reference directly.
+Choose **Tools → Maths → Add**, select a VCM Telemetry preset, or click
+**Import .MathParameter.xml…**. Enter a channel name, output units and a formula.
 
 | Reference | Input |
 | --- | --- |
 | `[12]` or `[0x000C]` | Engine speed in a log carrying the PID |
 | `[Engine Speed|RPM]` | A uniquely named input in the specified recorded unit |
 | `[7101.10]` | A/C pressure sensor input in volts |
+| `[50090.156.slope(250)]` | Rate of change of Throttle Position (%) over a 250 ms window |
+| `[50118.238.avg(250)]` | Rolling mean of Commanded Equivalence Ratio over 250 ms |
+| `[2517.161.avg(-200)]` | Lookahead mean of DFCO state over the next 200 ms |
+| `[13.114.derivative()]` | Instantaneous rate of change (`dx/dt`) of Vehicle Speed |
+| `[13.114.integral()]` | Cumulative trapezoidal time integral (`∫ x dt`) |
+| `[12.56.delta()]` / `[12.56.prev()]` | Sample-to-sample difference or previous sample |
 
-The editable **Wideband AFR** preset starts with `(([7101.10] / 0.5) + 9.57)`.
-The formula editor accepts arithmetic, comparisons, parentheses and functions
-including `abs`, `sqrt`, `min`, `max`, `pow`, `log`, `log10`, `exp`, `round` and
-`if(condition, trueValue, falseValue)`. Expressions use recorded values and
-units. If an input is missing, ambiguous or older than 500 ms, its calculated
-reading is blank. Formula settings are saved with the scanner layout. Use
-**Export CSV** to write the calculated columns alongside the raw inputs.
+Supported VCM Telemetry channel methods:
+- `.avg(ms)` / `.mean(ms)`, `.min(ms)`, `.max(ms)`, `.sum(ms)`, `.count(ms)`
+- `.slope(ms)` / `.rate(ms)` (units per second over window; negative `ms` looks ahead)
+- `.derivative()` / `.deriv()` / `.roc()`, `.integral()` / `.integ()`
+- `.delta(ms)` / `.diff(ms)`, `.lag(ms)` / `.delay(ms)` / `.prev()`
+
+Supported operators and functions:
+- Arithmetic (`+`, `-`, `*`, `/`), comparisons (`=`, `==`, `!=`, `<>`, `<`, `<=`, `>`, `>=`), and boolean logic (`and`, `or`, `not`, `&&`, `||`)
+- Built-in functions: `abs`, `sqrt`, `min`, `max`, `pow`, `log`, `log10`, `exp`, `round`, `clamp(val, lo, hi)`, `iff(cond, t, f)`, and `if(cond, t, f)`
+- Built-in VCM Telemetry presets: `Wideband AFR`, `CL Filter`, `PE Filter`, `MAF CL Error`, `MAF PE Error`, `PE FOR AFR Error`, `VVE FOR CL Error`, `VVE FOR PE Error`, `VVE FOR AFR Error`, `Combined Fuel Trim`, `Boost Pressure (psi)`, `Injector Duty Cycle`, `Dynamic Air Mass Per Sec`, `Horsepower (Estimated)`, and `Torque (Estimated)`.
+
+Formula settings are saved with the layout. Missing or ambiguous sources
+produce blank readings. Lookahead methods use future samples already in a log.
+
+## VCM control frame preview
+
+**Tools → VCM control preview** shows draft J1850 VPW frames for P01/P59
+special functions, including CASE learn, relay overrides, and cylinder balance.
+The same preview is available from the command line.
+
+```sh
+./WrongWayScanner --vcm-control-preview CrankRelearn
+```
+
+Live control requires PCM-specific frame verification and hardware testing.
+
+## Telemetry Hub
+
+Open **Tools → Telemetry Hub** to reopen indexed HPL and CSV logs, see frame
+counts and duration, or export a JSON bundle from the current log. The index
+and export store peak readings and VIN when the log contains those channels. Sessions are
+stored under `$XDG_CONFIG_HOME/wrongway-suite` or `~/.config/wrongway-suite`.
+Recorded OS IDs are stored when identified during live capture.
+
+```sh
+./WrongWayScanner --telemetry-sessions
+./WrongWayScanner --telemetry-export input.hpl bundle.json
+./WrongWayScanner --import-vcm-xml input.Graphs.xml layout.json
+python3 readout-bridge.py serve-http ./WrongWayScanner --port 8765
+```
+
+Open `http://127.0.0.1:8765` for channel readout and recent sessions. The
+dashboard also exposes `/api/status`, `/api/catalog`, and `/api/sessions`.
+The QEMU guest bridge handles the `sessions` command alongside `status`
+and `catalog`.
 
 ## Connect an OBDX Pro GT
 

@@ -7,6 +7,9 @@ case "${1:-}" in
         printf '%s\n' 'Usage: ./launch.sh [scanner [log.hpl|log.csv]]' \
             '       ./launch.sh scanner --tune BIN XDF' \
             '       ./launch.sh scanner --catalog [OS] | --scanner-status' \
+            '       ./launch.sh scanner --telemetry-sessions | --telemetry-export LOG.hpl OUT.json' \
+            '       ./launch.sh scanner --import-vcm-xml INPUT.xml LAYOUT.json' \
+            '       ./launch.sh scanner --vcm-control-preview ACTION [VALUE]' \
             '       ./launch.sh pcm [--port /dev/ttyUSB0]'
         exit 0
         ;;
@@ -25,7 +28,7 @@ esac
 
 if [ "$1" = "$suite_dir/Scanner/WrongWayScanner" ]; then
     case "${2:-}" in
-        --catalog|--scanner-status|--inspect|--tune-inspect) exec "$@" ;;
+        --catalog|--scanner-status|--inspect|--tune-inspect|--telemetry-sessions|--telemetry-export|--import-vcm-xml|--vcm-control-preview) exec "$@" ;;
     esac
 fi
 

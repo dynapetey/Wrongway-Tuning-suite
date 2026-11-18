@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
+using System.Globalization;
 using System.Text.Json;
 
 namespace WrongWay;
@@ -24,7 +25,9 @@ static class Program
                 Console.WriteLine("Layout persistence and histogram checks passed.");
                 MathChannel.SelfTest();
                 HistogramSnapshot.SelfTest();
-                Console.WriteLine("Formula, voltage units and time alignment checks passed.");
+                Console.WriteLine("Formula, VCM window methods, voltage units and time alignment checks passed.");
+                VcmTelemetryControls.SelfTest();
+                Console.WriteLine("VCM frame preview and XML import checks passed.");
                 if (args.Length == 2)
                 {
                     UserTuneParameter.SelfTest(args[1]);
@@ -50,6 +53,44 @@ static class Program
             if (args is ["--scanner-status"])
             {
                 Console.WriteLine(ScannerReadout.Read().GetAwaiter().GetResult());
+                return 0;
+            }
+            if (args is ["--telemetry-sessions"])
+            {
+                Console.WriteLine(JsonSerializer.Serialize(VcmTelemetryControls.LoadSessions()));
+                return 0;
+            }
+            if (args is ["--telemetry-export", var logInput, var bundleOutput])
+            {
+                if (Path.GetFullPath(logInput) == Path.GetFullPath(bundleOutput))
+                    throw new ArgumentException("Choose a separate path for the telemetry bundle.");
+                var log = ScanLog.Load(logInput);
+                var layout = File.Exists(ScannerLayout.DefaultPath) ? ScannerLayout.Load(ScannerLayout.DefaultPath) : ScannerLayout.Default;
+                MathChannel.Build(log, layout.Maths ?? MathSetting.Defaults);
+                VcmTelemetryControls.ExportTelemetryBundle(log, null, null, bundleOutput);
+                Console.WriteLine($"Exported telemetry bundle to {bundleOutput}");
+                return 0;
+            }
+            if (args is ["--import-vcm-xml", var xmlInput, var layoutOutput])
+            {
+                var baseLayout = File.Exists(layoutOutput) ? ScannerLayout.Load(layoutOutput) : ScannerLayout.Default;
+                var imported = VcmConfigImporter.ImportLayoutXml(xmlInput, baseLayout);
+                imported.Save(layoutOutput);
+                Console.WriteLine($"Imported {Path.GetFileName(xmlInput)} into {layoutOutput}");
+                return 0;
+            }
+            if (args.Length >= 2 && args[0] == "--vcm-control-preview")
+            {
+                if (args.Length > 3 || !Enum.TryParse<VcmControlAction>(args[1], ignoreCase: true, out var action)
+                    || !Enum.IsDefined(action))
+                    throw new ArgumentException("Choose a named VCM control and an optional value.");
+                double? target = args.Length == 3
+                    ? double.Parse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture) : null;
+                int? cylinder = null;
+                if (action == VcmControlAction.CylinderPowerBalance && args.Length == 3)
+                    cylinder = int.Parse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture);
+                var frame = VcmTelemetryControls.BuildVpwCommand(new VcmControlRequest(action, target, cylinder));
+                Console.WriteLine(JsonSerializer.Serialize(new { Action = action.ToString(), DraftFrameHex = Convert.ToHexString(frame) }));
                 return 0;
             }
             if (args is ["--serial-test", var port])
@@ -123,7 +164,9 @@ static class Program
             {
                 Console.Error.WriteLine("WrongWayScanner [log.hpl|log.csv]");
                 Console.Error.WriteLine("WrongWayScanner --inspect FILE | --export INPUT OUTPUT");
-                Console.Error.WriteLine("WrongWayScanner --catalog [OS] | --scanner-status");
+                Console.Error.WriteLine("WrongWayScanner --catalog [OS] | --scanner-status | --telemetry-sessions");
+                Console.Error.WriteLine("WrongWayScanner --telemetry-export LOG OUTPUT.json | --import-vcm-xml INPUT.xml LAYOUT.json");
+                Console.Error.WriteLine("WrongWayScanner --vcm-control-preview ACTION [VALUE]");
                 Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE | --discover-gt DEVICE");
                 Console.Error.WriteLine("WrongWayScanner --tune BIN XDF | --tune-inspect BIN XDF");
                 return 2;

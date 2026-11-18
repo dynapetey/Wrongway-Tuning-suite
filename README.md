@@ -30,10 +30,15 @@ bundled. The suite uses an X11 desktop, including XWayland.
   copy with updated checksums.
 - Use **Layout** to edit gauges, histogram axes and cell statistics, time
   chart traces, display channels and the live recording profile. Save and
-  load layouts as JSON to switch setups.
+  load layouts as JSON to switch setups. **Layout → Import VCM XML** imports
+  channel lists, graph tables, layouts and math parameters. Each histogram
+  table can have its own sample filter.
 - Use **Tools → Maths** to create formula channels for live and recorded
-  data. Open **Tune BIN → Edit → User Defined Parameters** to define and
+  data. VCM formulas support time windows, boolean logic and `[PID.UnitID]`
+  references. Open **Tune BIN → Edit → User Defined Parameters** to define and
   scale calibration scalars and tables by BIN offset.
+- **Tools → Telemetry Hub** indexes opened or recorded logs and exports JSON
+  telemetry bundles. **VCM control preview** shows draft frames offline.
 - **Channels** opens with the catalog for P59 OS 12587811. Search by name or
   PID, or use **+** to add a channel to the recording profile. **Read ECM PIDs**
   queries the ECM and filters the list to reported standard and responding

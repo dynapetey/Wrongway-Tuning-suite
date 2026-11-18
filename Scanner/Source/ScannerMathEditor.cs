@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 
 namespace WrongWay;
 
@@ -18,7 +19,7 @@ sealed partial class ScannerWindow
         if (hardware is not null || busy)
             return;
         var result = await EditList("Maths",
-            "Create named formula channels for the chart, gauges, and graph. Inputs use recorded units or other math channels. Bracket a channel name or PID.",
+            "Create named formula channels for the chart, gauges, and graph. Supports VCM telemetry methods (.avg, .slope, .min, .max, .derivative, .integral, .delta, .prev), boolean logic (and, or, =), and [PID.UnitID] tokens.",
             scannerLayout.Maths ?? MathSetting.Defaults, MathSetting.Maximum, EditMath,
             items =>
             {
@@ -39,7 +40,7 @@ sealed partial class ScannerWindow
         var name = Field(setting?.Name ?? "");
         var unit = Field(setting?.Unit ?? "");
         var formula = Field(setting?.Formula ?? "");
-        formula.MaxLength = 512;
+        formula.MaxLength = 1024;
         var enabled = new CheckBox { Content = "Calculate this channel", IsChecked = setting?.Enabled ?? true };
         var presets = MathSetting.PresetsFromAssets(liveOs);
         var presetChoice = Choice(presets.Select(p => p.Name).ToArray(), -1);
@@ -56,6 +57,31 @@ sealed partial class ScannerWindow
                 formula.Text = p.Formula;
             }
         };
+        var importStatus = new TextBlock { Foreground = Warning, TextWrapping = TextWrapping.Wrap };
+        var importXml = Button("Import .MathParameter.xml…", async () =>
+        {
+            try
+            {
+                var picked = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Import a VCM Math Parameter",
+                    FileTypeFilter = [new FilePickerFileType("VCM Math Parameter") { Patterns = ["*.xml"] }]
+                });
+                if (picked.FirstOrDefault()?.TryGetLocalPath() is not { } xmlPath)
+                    return;
+                var loaded = MathSetting.LoadVcmXml(xmlPath);
+                if (loaded.Length != 1)
+                    throw new InvalidDataException("Choose a file with exactly one math parameter, or use Layout → Import VCM XML.");
+                name.Text = loaded[0].Name;
+                unit.Text = loaded[0].Unit;
+                formula.Text = loaded[0].Formula;
+                importStatus.Text = "";
+            }
+            catch (Exception error)
+            {
+                importStatus.Text = error.Message;
+            }
+        });
         var sources = log?.Channels.Select(MathToken).Distinct().ToArray() ?? [];
         var source = Choice(sources, sources.Length > 0 ? 0 : -1);
         if (sources.Length == 0)
@@ -76,12 +102,13 @@ sealed partial class ScannerWindow
         insert.IsEnabled = sources.Length > 0;
         var hint = new TextBlock
         {
-            Text = "Use [12] for PID 12 or [name|unit] for an exact channel (including other math channels). Functions include abs, sqrt, min, max, pow and if.",
+            Text = "Use [12], [50070.56], or [name|unit] for channels, and append .avg(ms), .slope(ms), .min(ms), .max(ms), .derivative(), .integral(), or .delta(). Functions include abs, sqrt, min, max, pow, clamp, and if.",
             Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5)
         };
         var fields = DeskUi.Fields(("Preset", presetChoice), ("Name", name), ("Output units", unit),
             ("Formula", formula), ("Available channel", source));
-        fields.Children.Add(insert);
+        fields.Children.Add(Row(insert, importXml));
+        fields.Children.Add(importStatus);
         fields.Children.Add(hint);
         fields.Children.Add(enabled);
 
@@ -93,7 +120,7 @@ sealed partial class ScannerWindow
                 throw new FormatException("Enter a name of up to 120 characters and units of up to 80 characters.");
             _ = new MathFormula(next.Formula);
             return next;
-        }, height: 485);
+        }, height: 530);
     }
 
     private static string MathToken(Channel channel)

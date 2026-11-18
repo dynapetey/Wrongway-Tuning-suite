@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace WrongWay;
 
-sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, Guid? MathId = null)
+sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, Guid? MathId = null, int? VcmId = null)
 {
     public static readonly ChannelSource Rpm = new("@rpm");
     public static readonly ChannelSource Map = new("@map");
@@ -14,11 +14,17 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, G
             return null;
         if (MathId is { } id)
             return log.Channels.FirstOrDefault(channel => channel.MathId == id);
+        if (VcmId is { } vcmId)
+        {
+            var candidates = log.Channels.Where(channel => VcmConfigImporter.MatchesChannel(channel, vcmId) &&
+                (Unit.Length == 0 || VcmConfigImporter.SameUnit(channel.Unit, Unit))).Take(2).ToArray();
+            return candidates.Length == 1 ? candidates[0] : null;
+        }
         return Name switch
         {
-            "@rpm" => log.Find(12, "RPM") ?? log.Find(12, "Engine Speed"),
-            "@map" => log.Find(11, "Manifold Absolute Pressure") ?? log.Find(11, "Manifold Pressure") ?? log.Find(11, "MAP"),
-            "@throttle" => log.Find(17, "Throttle"),
+            "@rpm" => log.Find(12, "RPM") ?? log.Find(12, "Engine Speed") ?? log.Find(50070, "RPM"),
+            "@map" => log.Find(11, "Manifold Absolute Pressure") ?? log.Find(11, "Manifold Pressure") ?? log.Find(11, "MAP") ?? log.Find(50030, "MAP"),
+            "@throttle" => log.Find(17, "Throttle") ?? log.Find(50090, "Throttle"),
             _ => log.Channels.Where(channel => channel.Name == Name && channel.Unit == Unit)
                 .Skip(Occurrence).FirstOrDefault()
         };
@@ -72,10 +78,15 @@ sealed record GraphAxis(ChannelSource Source, double Width, double[] Breakpoints
     }
 }
 
-sealed record GraphSetting(GraphAxis X, GraphAxis Y, ChannelSource? Value, GraphStatistic Statistic, int MinimumSamples)
+sealed record GraphSetting(GraphAxis X, GraphAxis Y, ChannelSource? Value, GraphStatistic Statistic, int MinimumSamples,
+    string? Label = null, string? FilterExpression = null)
 {
     public static readonly GraphSetting Default = new(new(ChannelSource.Rpm, 500, []), new(ChannelSource.Map, 10, []),
-        null, GraphStatistic.Mean, 1);
+        null, GraphStatistic.Mean, 1, "Primary Histogram", null);
+
+    public override string ToString() =>
+        (string.IsNullOrWhiteSpace(Label) ? $"{X.Source} × {Y.Source}" : Label) +
+        (string.IsNullOrWhiteSpace(FilterExpression) ? "" : $"   ·   Filter: {FilterExpression}");
 }
 
 sealed record LiveChannelSetting(string Id, string Unit, string Label)
@@ -84,7 +95,7 @@ sealed record LiveChannelSetting(string Id, string Unit, string Label)
 }
 
 sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, GraphSetting Graph,
-    ChannelDisplay[] Channels, LiveChannelSetting[]? LiveChannels, MathSetting[]? Maths = null)
+    ChannelDisplay[] Channels, LiveChannelSetting[]? LiveChannels, MathSetting[]? Maths = null, GraphSetting[]? Graphs = null)
 {
     public static ScannerLayout Default => new(
         [new(ChannelSource.Rpm, "Engine speed", GaugeKind.Dial, 0, 8000, 0),
@@ -100,6 +111,9 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
 
     public static ScannerLayout Load(string path)
     {
+        if (path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            return VcmConfigImporter.ImportLayoutXml(path, Default);
+
         using var stream = File.OpenRead(path);
         if (stream.Length > 256 * 1024)
             throw new InvalidDataException("The scanner layout is larger than 256 KB.");
@@ -139,8 +153,8 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
             throw new InvalidDataException("Duplicate channel binding failed.");
         var display = new ChannelDisplay(source, "AFR", "AFR", 2, 9.57, 2, false);
         var settings = new GraphSetting(new(ChannelSource.From(log, x), 10, []),
-            new(ChannelSource.From(log, y), 1, [0, 10, 20]), source, GraphStatistic.Mean, 1);
-        var layout = Default with { Graph = settings, Channels = [display] };
+            new(ChannelSource.From(log, y), 1, [0, 10, 20]), source, GraphStatistic.Mean, 1, "AFR vs X/Y", "[Y] >= 10");
+        var layout = Default with { Graph = settings, Graphs = [settings], Channels = [display] };
         string path = Path.Combine(Path.GetTempPath(), "wrongway-layout-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
@@ -150,7 +164,7 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
             x.Readings.Add(new Reading(0, -1));
             y.Readings.Add(new Reading(0, 12));
             value.Readings.AddRange([new(0, 2), new(50, 3), new(600, 4)]);
-            var histogram = new HistogramSamples(loaded.Graph, x, y, value);
+            var histogram = new HistogramSamples(loaded.Graph, x, y, value, MathChannel.BuildFilter(log, loaded.Graph.FilterExpression));
             if (!histogram.AddSamples() || histogram.AddSamples()
                 || !histogram.Cells.TryGetValue((-10, 10), out var cell) || cell.Count != 2
                 || Math.Abs(cell.Mean - 14.57) > 0.000001 || value.Readings[0].CsvValue != "2")
@@ -168,8 +182,8 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
         && (Traces is null || Traces.Length <= 6 && Traces.All(t => t is not null && Source(t.Source) && Color(t.Color)
             && (t.Minimum is null && t.Maximum is null || t.Minimum is double low && t.Maximum is double high && Range(low, high)))
             && Traces.Select(t => t.Source).Distinct().Count() == Traces.Length)
-        && Graph is not null && Axis(Graph.X) && Axis(Graph.Y) && (Graph.Value is null || Source(Graph.Value))
-        && Enum.IsDefined(Graph.Statistic) && Graph.MinimumSamples is >= 1 and <= 1_000_000
+        && ValidGraph(Graph)
+        && (Graphs is null || Graphs.Length <= 16 && Graphs.All(ValidGraph))
         && Channels is { Length: <= 128 } && Channels.All(c => c is not null && Source(c.Source) && Text(c.Name)
             && c.Unit is { Length: <= 80 } && double.IsFinite(c.Scale) && c.Scale != 0 && double.IsFinite(c.Offset) && c.Decimals is >= 0 and <= 6)
         && Channels.Select(c => c.Source).Distinct().Count() == Channels.Length
@@ -178,8 +192,22 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
             && LiveChannels.Select(c => c.Id).Distinct().Count() == LiveChannels.Length)
         && (Maths is null || MathSetting.Validate(Maths));
 
+    private static bool ValidGraph(GraphSetting? g)
+    {
+        if (g is null || !Axis(g.X) || !Axis(g.Y) || (g.Value is not null && !Source(g.Value))
+            || !Enum.IsDefined(g.Statistic) || g.MinimumSamples is < 1 or > 1_000_000
+            || (g.Label is not null && g.Label.Length > 120))
+            return false;
+        if (!string.IsNullOrWhiteSpace(g.FilterExpression))
+        {
+            try { _ = new MathFormula(g.FilterExpression); }
+            catch (FormatException) { return false; }
+        }
+        return true;
+    }
+
     private static bool Axis(GraphAxis? axis) => axis is not null && Source(axis.Source) &&
-        double.IsFinite(axis.Width) && axis.Width > 0 && axis.Breakpoints is { Length: <= 80 }
+        double.IsFinite(axis.Width) && axis.Width > 0 && axis.Breakpoints is { Length: <= 120 }
         && axis.Breakpoints.All(double.IsFinite)
         && axis.Breakpoints.Zip(axis.Breakpoints.Skip(1), (a, b) => a < b).All(increasing => increasing);
     private static bool Source(ChannelSource? source) => source is not null && Text(source.Name)

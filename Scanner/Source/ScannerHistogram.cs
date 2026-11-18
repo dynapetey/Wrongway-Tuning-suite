@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
 
 namespace WrongWay;
 
@@ -78,6 +79,7 @@ sealed partial class ScannerWindow
     private ContentControl histogramTable = new();
     private TextBlock histogramStatus = DeskUi.Label("", 12, Muted);
     private HistogramSamples? histogram;
+    private int selectedGraphIndex;
     private long histogramRefresh;
 
     internal HistogramSnapshot? CurrentHistogramSnapshot()
@@ -90,6 +92,16 @@ sealed partial class ScannerWindow
             new Dictionary<(double X, double Y), HistogramSamples.Cell>(current.Cells));
     }
 
+    private GraphSetting[] AvailableGraphs() =>
+        scannerLayout.Graphs is { Length: > 0 } graphs ? graphs : [scannerLayout.Graph];
+
+    private GraphSetting ActiveGraphSetting()
+    {
+        var graphs = AvailableGraphs();
+        selectedGraphIndex = Math.Clamp(selectedGraphIndex, 0, graphs.Length - 1);
+        return graphs[selectedGraphIndex];
+    }
+
     private void RefreshHistogram()
     {
         histogram = null;
@@ -98,28 +110,57 @@ sealed partial class ScannerWindow
             graph.Content = DeskUi.Label("Open a log or record live data to build the histogram.");
             return;
         }
-        var settings = scannerLayout.Graph;
+        var graphs = AvailableGraphs();
+        var settings = ActiveGraphSetting();
         var x = settings.X.Source.Resolve(log);
         var y = settings.Y.Source.Resolve(log);
+
+        var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        if (graphs.Length > 1)
+        {
+            var tablePicker = new ComboBox
+            {
+                ItemsSource = graphs.Select((g, idx) => string.IsNullOrWhiteSpace(g.Label) ? $"Table {idx + 1}" : g.Label).ToArray(),
+                SelectedIndex = selectedGraphIndex,
+                MinWidth = 180
+            };
+            tablePicker.SelectionChanged += (_, _) =>
+            {
+                if (tablePicker.SelectedIndex >= 0 && tablePicker.SelectedIndex != selectedGraphIndex)
+                {
+                    selectedGraphIndex = tablePicker.SelectedIndex;
+                    RefreshHistogram();
+                }
+            };
+            headerRow.Children.Add(DeskUi.Label("Table:", 11, Muted));
+            headerRow.Children.Add(tablePicker);
+        }
+
         if (x is null || y is null || x == y)
         {
-            graph.Content = DeskUi.Label("Choose two available axis channels in Edit graph.");
+            headerRow.Children.Add(DeskUi.Label("Choose two available axis channels in Edit graph.", 12, Muted));
+            graph.Content = new StackPanel { Margin = new Thickness(5), Spacing = 6, Children = { headerRow } };
             return;
         }
         var value = settings.Value is { } input ? input.Resolve(log) : log.Channels.FirstOrDefault(channel =>
             channel != x && channel != y && channel.Readings.Any(reading => reading.Number.HasValue));
         if (settings.Statistic != GraphStatistic.Count && value is null)
         {
-            graph.Content = DeskUi.Label("Choose an available numeric value channel in Edit graph.");
+            headerRow.Children.Add(DeskUi.Label("Choose an available numeric value channel in Edit graph.", 12, Muted));
+            graph.Content = new StackPanel { Margin = new Thickness(5), Spacing = 6, Children = { headerRow } };
             return;
         }
         var source = settings.Statistic == GraphStatistic.Count ? x : value!;
-        histogram = new HistogramSamples(settings, x, y, source);
+        var filterFn = MathChannel.BuildFilter(log, settings.FilterExpression);
+        histogram = new HistogramSamples(settings, x, y, source, filterFn);
         var summary = settings.Statistic == GraphStatistic.Count ? "Sample count" : $"{settings.Statistic} of {source.DisplayLabel}";
+        if (!string.IsNullOrWhiteSpace(settings.FilterExpression))
+            summary += $"   ·   Filter: {settings.FilterExpression}";
+        headerRow.Children.Add(DeskUi.Section($"{x.DisplayLabel} × {y.DisplayLabel}   ·   {summary}"));
         histogramTable = new ContentControl();
         histogramStatus = DeskUi.Label("", 12, Muted);
         var panel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(5), RowSpacing = 5 };
-        Put(panel, DeskUi.Section($"{x.DisplayLabel} × {y.DisplayLabel}   ·   {summary}"), 0);
+        Put(panel, headerRow, 0);
         Put(panel, histogramStatus, 1);
         Put(panel, new ScrollViewer { Content = histogramTable, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }, 2);
         graph.Content = panel;
@@ -134,10 +175,11 @@ sealed partial class ScannerWindow
         if (!histogram.AddSamples() && !force)
             return;
         histogramStatus.Text = histogram.TooManyBins
-            ? "An axis exceeds 80 bins. Increase its bin width or enter breakpoints."
+            ? "An axis exceeds 120 bins. Increase its bin width or enter breakpoints."
             : histogram.Cells.Count == 0
-                ? "No numeric samples align with both axes within 500 ms."
-                : $"Columns: {histogram.X.DisplayLabel}   ·   Rows: {histogram.Y.DisplayLabel}";
+                ? "No numeric samples align with both axes (and filter) within 500 ms."
+                : $"Columns: {histogram.X.DisplayLabel}   ·   Rows: {histogram.Y.DisplayLabel}" +
+                  (histogram.FilteredOut > 0 ? $"   ·   Filtered out: {histogram.FilteredOut:N0} samples" : "");
         histogramTable.Content = histogram.TooManyBins || histogram.Cells.Count == 0 ? null : DrawHistogram(histogram);
     }
 
@@ -180,7 +222,7 @@ sealed partial class ScannerWindow
     }
 }
 
-sealed class HistogramSamples(GraphSetting settings, Channel x, Channel y, Channel value)
+sealed class HistogramSamples(GraphSetting settings, Channel x, Channel y, Channel value, Func<long, bool>? filter = null)
 {
     public readonly record struct Cell(double Mean, double Minimum, double Maximum, int Count)
     {
@@ -195,6 +237,7 @@ sealed class HistogramSamples(GraphSetting settings, Channel x, Channel y, Chann
     public Channel Value => value;
     public Dictionary<(double X, double Y), Cell> Cells { get; } = [];
     public bool TooManyBins { get; private set; }
+    public int FilteredOut { get; private set; }
     private readonly HashSet<double> xBins = [];
     private readonly HashSet<double> yBins = [];
     private int next;
@@ -210,12 +253,17 @@ sealed class HistogramSamples(GraphSetting settings, Channel x, Channel y, Chann
             if (value.DisplayNumber(sample) is not double amount || x.DisplayNumber(rx) is not double dx ||
                 y.DisplayNumber(ry) is not double dy || sample.Time - rx!.Time > 500 || sample.Time - ry!.Time > 500)
                 continue;
+            if (filter is not null && !filter(sample.Time))
+            {
+                FilteredOut++;
+                continue;
+            }
             var key = (settings.X.Bin(dx), settings.Y.Bin(dy));
             if (!double.IsFinite(key.Item1) || !double.IsFinite(key.Item2))
                 continue;
             xBins.Add(key.Item1);
             yBins.Add(key.Item2);
-            if (xBins.Count > 80 || yBins.Count > 80)
+            if (xBins.Count > 120 || yBins.Count > 120)
                 TooManyBins = true;
             else
                 Cells[key] = Cells.GetValueOrDefault(key).Add(amount);
