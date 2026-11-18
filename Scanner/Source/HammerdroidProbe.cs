@@ -93,10 +93,10 @@ sealed partial class HammerdroidProbe(LinuxSerialPort serial, CancellationToken 
         string firmware = string.Join(".", await AdapterValue(0x22, 0x01));
         string hardware = string.Join(".", await AdapterValue(0x22, 0x00));
         string serialNumber = Convert.ToHexString(await AdapterValue(0x22, 0x04));
-        byte[] voltage = await AdapterValue(0x3A, 0x00);
-        if (voltage.Length < 2)
-            throw new IOException("The GT voltage response was incomplete.");
-        double measured = BinaryPrimitives.ReadUInt16BigEndian(voltage) * 0.009047468 + 0.2;
+        byte[] voltage = await Command(0x3A, [0x00, 0x00]); // Read ADC channel 0.
+        if (voltage.Length != 4 || voltage[0] != 0x00 || voltage[1] != 0x00)
+            throw new IOException("The GT returned an invalid voltage response for ADC channel 0.");
+        double measured = BinaryPrimitives.ReadUInt16BigEndian(voltage.AsSpan(2)) * 0.009047468 + 0.2;
         return new GtAdapter(name, firmware, hardware, serialNumber, measured);
     }
 

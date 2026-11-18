@@ -56,17 +56,17 @@ def elm(fd, no_prompt=False):
     expect(fd, b'DXDP1\r')
     os.write(fd, b'DXDP1\rOK\r>')
 
-def adapter(fd, corrupt=False):
+def adapter(fd, corrupt=False, adc_channel=0):
     commands = [
-        (0x22, 3, b'OBDX Pro GT'),
-        (0x22, 1, b'\x01\x06\x02'),
-        (0x22, 0, b'\x02\x01'),
-        (0x22, 4, bytes.fromhex('12 A0 0B 44')),
-        (0x3A, 0, bytes.fromhex('05 80')),
+        (0x22, b'\x03', b'\x03OBDX Pro GT'),
+        (0x22, b'\x01', b'\x01\x01\x06\x02'),
+        (0x22, b'\x00', b'\x00\x02\x01'),
+        (0x22, b'\x04', bytes.fromhex('04 12 A0 0B 44')),
+        (0x3A, b'\x00\x00', bytes([0, adc_channel]) + bytes.fromhex('05 80')),
     ]
-    for cmd, sub, value in commands:
-        expect(fd, frame(cmd, bytes([sub])))
-        packet = frame(cmd + 0x10, bytes([sub]) + value)
+    for cmd, request, reply_payload in commands:
+        expect(fd, frame(cmd, request))
+        packet = frame(cmd + 0x10, reply_payload)
         if corrupt:
             os.write(fd, packet[:-1] + bytes([packet[-1] ^ 1]))
             return
@@ -138,6 +138,14 @@ with session('--probe-gt') as (fd, p):
     out, err = p.communicate(timeout=5)
     assert p.returncode == 0 and json.loads(out)['Pcm'] is None, (out, err)
 print('PASS adapter-only path and serial release.')
+
+with session('--probe-gt') as (fd, p):
+    elm(fd)
+    adapter(fd, adc_channel=1)
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode == 1 and 'ADC channel 0' in err, (out, err)
+print('PASS a voltage response from the wrong ADC channel is rejected.')
 
 with session('--identify-gt') as (fd, p):
     elm(fd)
