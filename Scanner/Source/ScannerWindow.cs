@@ -133,7 +133,9 @@ sealed partial class ScannerWindow : Window
                     DeskUi.Action("Save layout as…", Button("Save layout as", SaveLayout)),
                     DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
                     DeskUi.Action("Reset to defaults…", Button("Reset layout", ResetLayout))),
-                DeskUi.Menu("_Tools", DeskUi.Action("Maths", mathsButton), DeskUi.Action("Wideband AFR", widebandButton), pcmToolsMenu)
+                DeskUi.Menu("_Tools", DeskUi.Action("Maths", mathsButton), DeskUi.Action("Wideband AFR", widebandButton),
+                    pcmToolsMenu, DeskUi.Action("LM7 to ’95 F-150 wiring guide…",
+                        Button("LM7 to ’95 F-150 wiring guide", () => new WiringGuideWindow().ShowDialog(this))))
             }
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,

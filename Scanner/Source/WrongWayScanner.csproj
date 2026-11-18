@@ -21,5 +21,6 @@
     <PackageReference Include="System.IO.Ports" Version="10.0.5" />
     <Reference Include="PcmLibrary" HintPath="ThirdParty/PcmLibrary.dll" />
     <Content Include="Assets/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <EmbeddedResource Include="Reference/LM7-F150/*" LogicalName="WrongWay.WiringGuide.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

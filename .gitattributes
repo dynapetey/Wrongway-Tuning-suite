@@ -1,4 +1,5 @@
 PCM/** -text
 Scanner/Assets/** -text
 Scanner/Source/Assets/** -text
+Scanner/Source/Reference/LM7-F150/*.pdf binary
 Scanner/Licenses/** -text
