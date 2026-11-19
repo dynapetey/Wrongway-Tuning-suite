@@ -26,7 +26,8 @@ loopback regression check includes a 16 KiB queued frame.
 
 For an OS missing from the bundled lookup, hardware ID `12589162` enables the
 P59 read protocol. An OS-and-calibration write additionally requires a valid
-P59 backup matching the connected PCM's current OS and a supported P59 target.
+P59 backup matching the connected PCM's current OS and serial number, and a
+supported P59 target.
 This path retains flash-chip size and CRC checks and preserves parameter
 blocks. Other unknown hardware remains blocked.
 

@@ -372,15 +372,26 @@ public static class LinuxBackend
             throw new IOException("The unrecognized PCM OS requires verified P59 hardware and a supported P59 target image.");
         if (string.IsNullOrWhiteSpace(backup) || Path.GetFullPath(backup) == Path.GetFullPath(file))
             throw new IOException("Choose a separate original PCM backup with --backup.");
-        var saved = new FileValidator(File.ReadAllBytes(backup), logger);
+        byte[] original = File.ReadAllBytes(backup);
+        var saved = new FileValidator(original, logger);
         if (!saved.IsValid() || saved.GetFileType() != PcmType.P59 || saved.GetOsidFromImage() != os.Value)
             throw new IOException("The P59 backup must validate and match the connected PCM's current OS.");
+        var serial = await vehicle.QuerySerial();
+        if (serial.Status != ResponseStatus.Success || string.IsNullOrWhiteSpace(serial.Value) ||
+            !System.Text.Encoding.ASCII.GetString(original, 0x4000, 0x4000).Contains(serial.Value.Trim()))
+            throw new IOException("The original P59 backup must contain the connected PCM's serial number.");
 
         // The OS catalog is incomplete; identify this controller using its independent hardware ID.
         // Keep upstream flash-chip size, kernel OS-response and per-range CRC verification intact.
         // Only OS+calibration (which preserves parameter blocks) and simulated test writes use this path.
         var info = new OSIDInfo(PcmType.P59);
         logger.AddUserMessage("Verified P59 hardware 12589162 and original OS " + os.Value + " backup. Using the P59 kernel for " + kind + ".");
+        int rpm = await ReadPreflightPid(vehicle, 0x000C, token);
+        int speed = await ReadPreflightPid(vehicle, 0x000D, token);
+        if (rpm != 0 || speed != 0)
+            throw new IOException("Park the vehicle and switch the engine off. Leave ignition power on before flashing.");
+        var voltage = await vehicle.QueryVoltage();
+        logger.AddUserMessage("Preflight: engine RPM 0, vehicle speed 0; PCM voltage " + (voltage.Status == ResponseStatus.Success ? voltage.Value : "unavailable") + ".");
         await vehicle.SuppressChatter();
         if (!await vehicle.UnlockEcu(info.KeyAlgorithm))
         {
@@ -390,6 +401,23 @@ public static class LinuxBackend
         logger.AddUserMessage("Unlock succeeded.");
         var writer = new CKernelWriter(vehicle, info, new Protocol(), kind, logger);
         return await writer.Write(File.ReadAllBytes(file), 0, target, true, token);
+    }
+    static async Task<int> ReadPreflightPid(Vehicle vehicle, uint pid, CancellationToken token)
+    {
+        var protocol = new Protocol();
+        await vehicle.SetDeviceTimeout(TimeoutScenario.ReadProperty);
+        var query = vehicle.CreateQuery<int>(() => protocol.CreatePidRequest(pid), message =>
+        {
+            byte[] bytes = message.GetBytes();
+            int expectedLength = pid == 0x000C ? 8 : 7;
+            if (bytes.Length != expectedLength || bytes[4] != (byte)(pid >> 8) || bytes[5] != (byte)pid)
+                return Response.Create(ResponseStatus.UnexpectedResponse, 0);
+            return protocol.ParsePidResponse(message);
+        }, token);
+        var response = await query.Execute();
+        if (response.Status != ResponseStatus.Success)
+            throw new IOException("The PCM must report engine RPM and vehicle speed before flashing.");
+        return response.Value;
     }
     static async Task<bool> Properties(Vehicle vehicle,JsonLogger logger,CancellationToken token)
     {
