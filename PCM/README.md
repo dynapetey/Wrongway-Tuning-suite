@@ -136,9 +136,13 @@ BLE pairing, real-time RAM tuning, segment swaps and complete OEM service
 functions are not implemented. Advanced XDF linked/nonlinear/per-cell equations,
 patch/function definitions and XDF stride layouts are reported as unsupported.
 
-**Real PCM identification, read/write, recovery, live logging and DTC handling
-remain untested on hardware.** Native serial loopback, synthetic BINs and UI
-tests verify software behavior, not vehicle compatibility. Review `validation.txt`.
+P59 identification, a full 1 MiB backup, simulated write, and an OS/calibration/
+boot replacement from OS `1252075` to `12587811` were validated with an OBDX
+Pro GT on Linux on 2026-11-19. The final comparison matched all 19 flash ranges,
+including both preserved parameter blocks. See [hardware results](hardware-validation-2026-11-19.md).
+Recovery, other write modes, continuous live logging, DTC handling and other
+adapters are not established by that test. Review `validation.txt` for the
+earlier offline checks.
 
 ## Source, tests and rebuilding
 

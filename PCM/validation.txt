@@ -1,4 +1,13 @@
-WrongWay Tuner Linux 0.2.0 validation
+Hardware validation update: 2026-11-19
+P59 hardware 12589162 with OBDX Pro GT USB on Linux:
+Full 1 MiB backup independently matched all 19 flash-range CRCs.
+Simulated write and OS/calibration/boot replacement 1252075 -> 12587811 passed at 4x VPW.
+All write requests succeeded on the first attempt.
+Post-write OS identification returned 12587811 with the original VIN and serial.
+Independent final comparison matched all 19 ranges, including both original parameter blocks.
+See hardware-validation-2026-11-19.md for scope and regression results.
+
+Historical WrongWay Tuner Linux 0.2.0 validation (before hardware was available)
 
 Build host: Ubuntu 24.04 x86-64; Python 3.12; Mono 6.8; Tk 8.6.
 Native backend compiled with mcs without warnings.
