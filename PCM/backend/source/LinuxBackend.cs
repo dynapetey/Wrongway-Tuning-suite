@@ -140,12 +140,38 @@ public sealed class LinuxSerialPort : IPort
     public void Dispose() { lock(gate) { if(fd>=0) {close(fd);fd=-1;} received.Clear(); } }
 }
 
+public sealed class LinuxObdxProDevice : OBDXProDevice
+{
+    private TimeoutScenario scenario;
+    public LinuxObdxProDevice(IPort port, ILogger logger) : base(port, logger) { }
+    public override Task<TimeoutScenario> SetTimeout(TimeoutScenario value)
+    {
+        scenario = value;
+        return base.SetTimeout(value);
+    }
+    protected override async Task Receive()
+    {
+        // Upstream OBDX Receive calls ReadDVIPacket without its scenario timeout,
+        // giving every first-byte wait only one second. Do not resend a CRC query
+        // while the assembly kernel is still computing it and draining its FIFO.
+        int milliseconds = scenario == TimeoutScenario.ReadCrc ? 10000 :
+            scenario == TimeoutScenario.EraseMemoryBlock ? 7000 : 0;
+        var deadline = DateTime.UtcNow.AddMilliseconds(milliseconds);
+        do
+        {
+            await base.Receive();
+        }
+        while (milliseconds > 0 && ReceivedMessageCount == 0 && DateTime.UtcNow < deadline);
+    }
+}
+
 public sealed class JsonLogger : ILogger
 {
     public bool Debug;
+    public bool CrcMismatched;
     static readonly object outputGate = new object();
     public static void Emit(object obj) { lock(outputGate) { Console.WriteLine(JsonConvert.SerializeObject(obj)); Console.Out.Flush(); } }
-    public void AddUserMessage(string message) { Emit(new {type="message", message}); }
+    public void AddUserMessage(string message) { if (message.Contains("\tDifferent\t")) CrcMismatched = true; Emit(new {type="message", message}); }
     public void AddDebugMessage(string message) { if(Debug) Emit(new {type="debug", message}); }
     public void StatusUpdateActivity(string message) { Emit(new {type="activity", message}); }
     public void StatusUpdateTimeRemaining(string message) { Emit(new {type="remaining", message}); }
@@ -271,7 +297,7 @@ public static class LinuxBackend
             string adapter=Get(opts,"--adapter","OBDX").ToUpperInvariant();
             switch(adapter)
             {
-                case "OBDX": device=new OBDXProDevice(port,logger); break;
+                case "OBDX": device=new LinuxObdxProDevice(port,logger); break;
                 case "ELM": device=new ElmDevice(port,logger); break;
                 case "AVT": device=new AvtDevice(port,logger); break;
                 default: throw new ArgumentException("Adapter must be OBDX, ELM or AVT.");
@@ -320,7 +346,7 @@ public static class LinuxBackend
                         case "write-full": case "recover-p59":kind=WriteType.Full;break;
                     }
                     bool? hardwareWrite = null;
-                    if (op == "write-os" || op == "test-write")
+                    if (op == "write-os" || op == "test-write" || op == "verify")
                         hardwareWrite = await WriteKnownP59(vehicle, logger, kind, file, Get(opts,"--backup"), validator, cts.Token);
                     if (hardwareWrite.HasValue)
                         success = hardwareWrite.Value;
@@ -366,13 +392,14 @@ public static class LinuxBackend
             return null; // Keep the normal upstream compatibility path for recognized operating systems.
 
         var hardware = await vehicle.QueryHardwareId();
+        bool comparingBackup = kind == WriteType.Compare;
         if (hardware.Status != ResponseStatus.Success || hardware.Value != 12589162 ||
             target.GetFileType() != PcmType.P59 ||
-            new OSIDInfo(target.GetOsidFromImage()).HardwareType != PcmType.P59)
+            (!comparingBackup && new OSIDInfo(target.GetOsidFromImage()).HardwareType != PcmType.P59))
             throw new IOException("The unrecognized PCM OS requires verified P59 hardware and a supported P59 target image.");
-        if (string.IsNullOrWhiteSpace(backup) || Path.GetFullPath(backup) == Path.GetFullPath(file))
+        if (!comparingBackup && (string.IsNullOrWhiteSpace(backup) || Path.GetFullPath(backup) == Path.GetFullPath(file)))
             throw new IOException("Choose a separate original PCM backup with --backup.");
-        byte[] original = File.ReadAllBytes(backup);
+        byte[] original = File.ReadAllBytes(comparingBackup ? file : backup);
         var saved = new FileValidator(original, logger);
         if (!saved.IsValid() || saved.GetFileType() != PcmType.P59 || saved.GetOsidFromImage() != os.Value)
             throw new IOException("The P59 backup must validate and match the connected PCM's current OS.");
@@ -383,7 +410,7 @@ public static class LinuxBackend
 
         // The OS catalog is incomplete; identify this controller using its independent hardware ID.
         // Keep upstream flash-chip size, kernel OS-response and per-range CRC verification intact.
-        // Only OS+calibration (which preserves parameter blocks) and simulated test writes use this path.
+        // OS+calibration preserves parameter blocks. Compare never erases or writes flash.
         var info = new OSIDInfo(PcmType.P59);
         logger.AddUserMessage("Verified P59 hardware 12589162 and original OS " + os.Value + " backup. Using the P59 kernel for " + kind + ".");
         int rpm = await ReadPreflightPid(vehicle, 0x000C, token);
@@ -400,7 +427,8 @@ public static class LinuxBackend
         }
         logger.AddUserMessage("Unlock succeeded.");
         var writer = new CKernelWriter(vehicle, info, new Protocol(), kind, logger);
-        return await writer.Write(File.ReadAllBytes(file), 0, target, true, token);
+        bool success = await writer.Write(File.ReadAllBytes(file), 0, target, true, token);
+        return success && (!comparingBackup || !logger.CrcMismatched);
     }
     static async Task<int> ReadPreflightPid(Vehicle vehicle, uint pid, CancellationToken token)
     {

@@ -95,6 +95,25 @@ class BackendTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertEqual(events[-1]['type'], 'error')
 
+    @unittest.skipUnless(shutil.which('mcs'), 'Mono C# compiler is not installed')
+    def test_delayed_obdx_crc_replies_do_not_trigger_retransmission(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / 'ObdxTimeoutCheck.exe'
+            compiled = subprocess.run([
+                'mcs', '-langversion:7.2',
+                '-r:/usr/lib/mono/4.5/Facades/netstandard.dll',
+                '-r:' + str(ROOT / 'backend/PcmLibrary.dll'),
+                '-r:' + str(ROOT / 'backend/wrongway-pcm.exe'),
+                '-out:' + str(output), str(ROOT / 'tests/ObdxTimeoutCheck.cs'),
+            ], capture_output=True, text=True, timeout=20)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            env = dict(os.environ)
+            env['MONO_PATH'] = str(ROOT / 'backend') + os.pathsep + env.get('MONO_PATH', '')
+            result = subprocess.run(['mono', str(output)], capture_output=True,
+                                    text=True, env=env, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('consecutive delayed OBDX CRC replies', result.stdout)
+
     def test_argv_preserves_spaces_without_shell(self):
         args = BackendRunner().command('validate', {'file': '/tmp/a folder/$(untouched).bin'})
         self.assertEqual(args[-1], '/tmp/a folder/$(untouched).bin')
