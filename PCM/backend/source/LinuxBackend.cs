@@ -18,6 +18,7 @@ public sealed class LinuxSerialPort : IPort
     private int fd=-1;
     private int timeout=1000;
     private readonly object gate = new object();
+    private readonly Queue<byte> received = new Queue<byte>();
     [StructLayout(LayoutKind.Sequential)] struct Termios {public uint input,output,control,local;public byte line;[MarshalAs(UnmanagedType.ByValArray,SizeConst=32)]public byte[] cc;public uint inputSpeed,outputSpeed;}
     [StructLayout(LayoutKind.Sequential)] struct PollFd {public int fd;public short events,revents;}
     [DllImport("libc",SetLastError=true)] static extern int open(string path,int flags);
@@ -83,6 +84,13 @@ public sealed class LinuxSerialPort : IPort
     {
         lock(gate)
         {
+            if (received.Count > 0)
+            {
+                int buffered = Math.Min(count, received.Count);
+                for (int index = 0; index < buffered; index++)
+                    bytes[offset + index] = received.Dequeue();
+                return Task.FromResult(buffered);
+            }
             if(count==0 || !Wait(1,timeout)) return Task.FromResult(0);
             var buffer=new byte[count];
             int got=read(fd,buffer,(UIntPtr)count).ToInt32();
@@ -92,10 +100,44 @@ public sealed class LinuxSerialPort : IPort
         }
     }
     public Task ChangeBaudRate(int baud) { lock(gate) { Configure(baud); } return Task.CompletedTask; }
-    public Task DiscardBuffers() { lock(gate) {if(tcflush(fd,2)!=0) throw Error("Serial flush");} return Task.CompletedTask; }
-    public Task<int> GetReceiveQueueSize() { lock(gate) {int size;if(ioctl(fd,0x541b,out size)!=0) throw Error("Serial queue");return Task.FromResult(size);} }
+    public Task DiscardBuffers()
+    {
+        lock (gate)
+        {
+            if (tcflush(fd, 2) != 0) throw Error("Serial flush");
+            received.Clear();
+        }
+        return Task.CompletedTask;
+    }
+    public Task<int> GetReceiveQueueSize()
+    {
+        lock (gate)
+        {
+            int available;
+            if (ioctl(fd, 0x541b, out available) != 0) throw Error("Serial queue");
+            while (available > 0)
+            {
+                // Drain the Linux TTY while upstream waits for a complete DVI frame.
+                // Its 4 KiB input queue is smaller than a 4096-byte kernel payload plus framing.
+                var buffer = new byte[Math.Min(available, 8192)];
+                int count = read(fd, buffer, (UIntPtr)buffer.Length).ToInt32();
+                if (count < 0)
+                {
+                    if (Marshal.GetLastWin32Error() == 11) break;
+                    throw Error("Serial receive queue");
+                }
+                if (count == 0) break;
+                for (int index = 0; index < count; index++)
+                    received.Enqueue(buffer[index]);
+                if (received.Count > 1024 * 1024)
+                    throw new IOException("The serial receive queue exceeded 1 MiB.");
+                if (ioctl(fd, 0x541b, out available) != 0) throw Error("Serial queue");
+            }
+            return Task.FromResult(received.Count);
+        }
+    }
     public void SetTimeout(int milliseconds) {timeout=Math.Max(1,milliseconds);}
-    public void Dispose() { lock(gate) { if(fd>=0) {close(fd);fd=-1;} } }
+    public void Dispose() { lock(gate) { if(fd>=0) {close(fd);fd=-1;} received.Clear(); } }
 }
 
 public sealed class JsonLogger : ILogger
@@ -199,7 +241,24 @@ public static class LinuxBackend
                 byte[] data=new byte[3]; int n=0;
                 while(n<3) { int got=await p.Receive(data,n,3-n); if(got==0) throw new TimeoutException("No serial loopback response."); n+=got; }
                 if(!data.SequenceEqual(new byte[]{0x65,0x43,0x21})) throw new Exception("Incorrect serial loopback response.");
-                JsonLogger.Emit(new {type="result", success=true, message="Serial open/send/receive/dispose passed."});
+                await p.Send(new byte[]{0x52,0x42});
+                const int frameSize = 16384;
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (await p.GetReceiveQueueSize() < frameSize && DateTime.UtcNow < deadline)
+                    await Task.Delay(1);
+                if (await p.GetReceiveQueueSize() != frameSize)
+                    throw new TimeoutException("Large serial frame did not arrive intact.");
+                data = new byte[frameSize];
+                n = 0;
+                while (n < frameSize)
+                {
+                    int got = await p.Receive(data, n, frameSize - n);
+                    if (got == 0) throw new TimeoutException("Large serial frame stopped arriving.");
+                    n += got;
+                }
+                for (int index = 0; index < frameSize; index++)
+                    if (data[index] != (byte)(index % 251)) throw new IOException("Large serial frame byte order failed.");
+                JsonLogger.Emit(new {type="result", success=true, message="Serial open/send/receive/dispose and 16 KiB queued frame passed."});
                 return 0;
             }
         }
@@ -240,8 +299,9 @@ public static class LinuxBackend
                 if(op=="identify") success=await Properties(vehicle,logger,cts.Token);
                 else if(op=="read")
                 {
+                    PcmType readType = await ReadController(vehicle, logger, cts.Token);
                     var manager=new ReadManager(logger,vehicle,a=>{a();return Task.CompletedTask;},()=>Task.FromResult<string>(null),()=>Task.FromResult(0u),alert,prompt,cts.Token);
-                    success=await manager.Read(output);
+                    success=await manager.Read(output, readType);
                     if(success && File.Exists(output)) success=new FileValidator(File.ReadAllBytes(output),logger).IsValid();
                     else success=false;
                 }
@@ -259,8 +319,16 @@ public static class LinuxBackend
                         case "write-os":kind=WriteType.OsPlusCalibrationPlusBoot;break;
                         case "write-full": case "recover-p59":kind=WriteType.Full;break;
                     }
-                    var manager=new WriteManager(logger,vehicle,kind,alert,prompt,cts.Token);
-                    success=await manager.Write(file,op=="recover-p59" ? PcmType.P59 : PcmType.Undefined);
+                    bool? hardwareWrite = null;
+                    if (op == "write-os" || op == "test-write")
+                        hardwareWrite = await WriteKnownP59(vehicle, logger, kind, file, Get(opts,"--backup"), validator, cts.Token);
+                    if (hardwareWrite.HasValue)
+                        success = hardwareWrite.Value;
+                    else
+                    {
+                        var manager=new WriteManager(logger,vehicle,kind,alert,prompt,cts.Token);
+                        success=await manager.Write(file,op=="recover-p59" ? PcmType.P59 : PcmType.Undefined);
+                    }
                 }
                 JsonLogger.Emit(new {type="result", success, operation=op});
                 vehicle.ShutdownSignalSource.Cancel();
@@ -268,6 +336,60 @@ public static class LinuxBackend
                 return success ? 0 : 2;
             }
         }
+    }
+    static async Task<PcmType> ReadController(Vehicle vehicle, JsonLogger logger, CancellationToken token)
+    {
+        var os = await vehicle.QueryOperatingSystemId(token);
+        if (os.Status != ResponseStatus.Success && !token.IsCancellationRequested)
+        {
+            logger.AddUserMessage("OS query failed; exiting any previous read kernel before retrying identification.");
+            await vehicle.ExitKernel();
+            os = await vehicle.QueryOperatingSystemId(token);
+        }
+        if (os.Status != ResponseStatus.Success)
+            throw new IOException("Cannot identify the PCM OS before reading.");
+        if (new OSIDInfo(os.Value).IsSupported)
+            return PcmType.Undefined;
+
+        var hardware = await vehicle.QueryHardwareId();
+        if (hardware.Status != ResponseStatus.Success || hardware.Value != 12589162)
+            throw new IOException("PCM OS " + os.Value + " is unrecognized and its hardware is not in the P59 read fallback list.");
+        logger.AddUserMessage("PCM OS " + os.Value + " is absent from the bundled OS lookup. Hardware ID 12589162 identifies a P59; using its 1 MiB read protocol.");
+        return PcmType.P59;
+    }
+    static async Task<bool?> WriteKnownP59(Vehicle vehicle, JsonLogger logger, WriteType kind, string file, string backup, FileValidator target, CancellationToken token)
+    {
+        var os = await vehicle.QueryOperatingSystemId(token);
+        if (os.Status != ResponseStatus.Success)
+            throw new IOException("Cannot identify the PCM before an OS write or connection test.");
+        if (new OSIDInfo(os.Value).IsSupported)
+            return null; // Keep the normal upstream compatibility path for recognized operating systems.
+
+        var hardware = await vehicle.QueryHardwareId();
+        if (hardware.Status != ResponseStatus.Success || hardware.Value != 12589162 ||
+            target.GetFileType() != PcmType.P59 ||
+            new OSIDInfo(target.GetOsidFromImage()).HardwareType != PcmType.P59)
+            throw new IOException("The unrecognized PCM OS requires verified P59 hardware and a supported P59 target image.");
+        if (string.IsNullOrWhiteSpace(backup) || Path.GetFullPath(backup) == Path.GetFullPath(file))
+            throw new IOException("Choose a separate original PCM backup with --backup.");
+        var saved = new FileValidator(File.ReadAllBytes(backup), logger);
+        if (!saved.IsValid() || saved.GetFileType() != PcmType.P59 || saved.GetOsidFromImage() != os.Value)
+            throw new IOException("The P59 backup must validate and match the connected PCM's current OS.");
+
+        // The OS catalog is incomplete; identify this controller using its independent hardware ID.
+        // Keep upstream flash-chip size, kernel OS-response and per-range CRC verification intact.
+        // Only OS+calibration (which preserves parameter blocks) and simulated test writes use this path.
+        var info = new OSIDInfo(PcmType.P59);
+        logger.AddUserMessage("Verified P59 hardware 12589162 and original OS " + os.Value + " backup. Using the P59 kernel for " + kind + ".");
+        await vehicle.SuppressChatter();
+        if (!await vehicle.UnlockEcu(info.KeyAlgorithm))
+        {
+            logger.AddUserMessage("Unlock was not successful.");
+            return false;
+        }
+        logger.AddUserMessage("Unlock succeeded.");
+        var writer = new CKernelWriter(vehicle, info, new Protocol(), kind, logger);
+        return await writer.Write(File.ReadAllBytes(file), 0, target, true, token);
     }
     static async Task<bool> Properties(Vehicle vehicle,JsonLogger logger,CancellationToken token)
     {

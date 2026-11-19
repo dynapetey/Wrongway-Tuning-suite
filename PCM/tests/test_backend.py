@@ -74,6 +74,15 @@ class BackendTests(unittest.TestCase):
             self.assertTrue(ready)
             self.assertEqual(os.read(master, 100), b'\x12\x34\x56')
             os.write(master, b'\x65\x43\x21')
+            ready, _, _ = select.select([master], [], [], 5)
+            self.assertTrue(ready)
+            self.assertEqual(os.read(master, 100), b'RB')
+            # A complete DVI read frame is larger than Linux's 4095-byte TTY queue.
+            # The backend must drain that queue while the protocol waits for a full frame.
+            payload = bytes(index % 251 for index in range(16384))
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(master, payload[offset:offset + 512])
             stdout, _ = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, stdout)
             self.assertTrue(json.loads(stdout)['success'])

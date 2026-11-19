@@ -20,6 +20,16 @@ Dependencies: Python 3.10+, Tk 8.6 and Mono 6.8+. No pip packages are required.
 The supplied backend was built and tested on Ubuntu x86-64. Its POSIX serial
 layout targets Linux x86-64; other architectures have not been tested.
 
+Linux receives large OBDX DVI packets through a managed buffer so a 4096-byte
+PCM read payload cannot overflow the smaller TTY input queue. The serial
+loopback regression check includes a 16 KiB queued frame.
+
+For an OS missing from the bundled lookup, hardware ID `12589162` enables the
+P59 read protocol. An OS-and-calibration write additionally requires a valid
+P59 backup matching the connected PCM's current OS and a supported P59 target.
+This path retains flash-chip size and CRC checks and preserves parameter
+blocks. Other unknown hardware remains blocked.
+
 If a USB serial port reports access denied:
 
 ```sh
