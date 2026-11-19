@@ -84,17 +84,20 @@ def want_pcm(fd, block):
 def reply(fd, block, value, command=8):
     os.write(fd, frame(command, bytes([0x6C, 0xF0, 0x10, 0x7C, block]) + value))
 
-def controls(fd, os_id=12587811, rpm=None):
+def controls(fd, os_id=12587811, rpm=None, speed=0):
     elm(fd)
     adapter(fd)
     enable_vpw(fd)
     want_pcm(fd, 10)
     reply(fd, 10, os_id.to_bytes(4, 'big'))
     if rpm is not None:
-        expect(fd, frame(0x10, bytes.fromhex('68 6A F0 01 0C')))
-        os.write(fd, frame(8, bytes.fromhex('48 6B 10 41 0C') + (rpm * 4).to_bytes(2, 'big')))
-        expect(fd, frame(0x10, bytes.fromhex('68 6A F0 01 0D')))
-        os.write(fd, frame(8, bytes.fromhex('48 6B 10 41 0D 00')))
+        expect(fd, frame(0x10, bytes.fromhex('6C 10 F0 22 00 0C 01')))
+        # Wrong PID and a truncated reply must not satisfy the stopped-engine check.
+        os.write(fd, frame(8, bytes.fromhex('6C F0 10 62 00 0D') + bytes([speed])))
+        os.write(fd, frame(8, bytes.fromhex('6C F0 10 62 00')))
+        os.write(fd, frame(8, bytes.fromhex('6C F0 10 62 00 0C') + (rpm * 4).to_bytes(2, 'big')))
+        expect(fd, frame(0x10, bytes.fromhex('6C 10 F0 22 00 0D 01')))
+        os.write(fd, frame(8, bytes.fromhex('6C F0 10 62 00 0D') + bytes([speed])))
 
 release_fans = frame(0x10, bytes.fromhex('6C 10 F0 AE 01 00 00 00 00 00 00'))
 accept_fans = frame(8, bytes.fromhex('6C F0 10 EE 01 E1'))
@@ -108,7 +111,7 @@ for action, payload in [('Fan1On', '80 80'), ('Fan1Off', '80 00'), ('Fan2On', '4
         expect(fd, frame(0x25))
         out, err = p.communicate(timeout=5)
         assert p.returncode == 0 and json.loads(out)['ReleaseReply'] == '6CF010EE01E1', (out, err)
-print('PASS four P59 fan relay commands, real PCM acknowledgement and automatic release.')
+print('PASS four P59 fan relay commands, PCM reply validation and automatic release.')
 
 for os_id, rpm, expected in [(1252075, None, 'unavailable'), (12587811, 650, 'switch the engine off')]:
     with session('--vcm-control-live', 'Fan1On', '--confirm') as (fd, p):
@@ -117,6 +120,13 @@ for os_id, rpm, expected in [(1252075, None, 'unavailable'), (12587811, 650, 'sw
         out, err = p.communicate(timeout=5)
         assert p.returncode != 0 and expected in err, (out, err)
 print('PASS fan overrides are blocked for an unverified OS or a running engine.')
+
+with session('--vcm-control-live', 'Fan1On', '--confirm') as (fd, p):
+    controls(fd, rpm=0, speed=1)
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode != 0 and 'Park the vehicle' in err, (out, err)
+print('PASS a moving vehicle cannot receive a fan override even with zero RPM.')
 
 for cancel in [False, True]:
     with session('--vcm-control-live', 'Fan1On', '--confirm') as (fd, p):
@@ -136,12 +146,29 @@ print('PASS rejected or stopped fan commands release the relays.')
 
 with session('--vcm-control-live', 'ClearTroubleCodes', '--confirm') as (fd, p):
     controls(fd, rpm=0)
+    expect(fd, frame(0x33, bytes.fromhex('00 F0 00')))
+    os.write(fd, frame(0x43, bytes.fromhex('00 F0 00')))
     expect(fd, frame(0x10, bytes.fromhex('68 6A F0 04')))
     os.write(fd, frame(8, bytes.fromhex('48 6B 10 44')))
+    expect(fd, frame(0x33, bytes.fromhex('00 F0 01')))
+    os.write(fd, frame(0x43, bytes.fromhex('00 F0 01')))
     expect(fd, frame(0x25))
     out, err = p.communicate(timeout=5)
     assert p.returncode == 0 and json.loads(out)['Reply'] == '486B1044', (out, err)
 print('PASS clearing DTCs waits for the PCM Mode $44 acknowledgement.')
+
+with session('--vcm-control-live', 'ClearTroubleCodes', '--confirm') as (fd, p):
+    controls(fd, rpm=0)
+    expect(fd, frame(0x33, bytes.fromhex('00 F0 00')))
+    os.write(fd, frame(0x43, bytes.fromhex('00 F0 00')))
+    expect(fd, frame(0x10, bytes.fromhex('68 6A F0 04')))
+    os.write(fd, frame(8, bytes.fromhex('6C F0 10 7F 04 22')))
+    expect(fd, frame(0x33, bytes.fromhex('00 F0 01')))
+    os.write(fd, frame(0x43, bytes.fromhex('00 F0 01')))
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode != 0 and 'status 0x22' in err, (out, err)
+print('PASS a rejected DTC clear still restores the destination filter.')
 
 with session('--identify-gt') as (fd, p):
     elm(fd)

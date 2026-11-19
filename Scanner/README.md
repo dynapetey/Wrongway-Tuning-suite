@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.9
+# WrongWay Scanner + Hammerdroid 0.4.12
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -89,6 +89,20 @@ seconds. The scanner checks RPM and vehicle speed, reports the PCM response,
 and returns the relays to automatic control when the test ends or is stopped.
 **Return fans to PCM** sends that release separately. **Clear DTCs** sends
 SAE Mode $04 and verifies the PCM acknowledgement.
+
+Version 0.4.12 reads stopped-engine status through addressed GM PIDs so the
+GT's destination filter cannot discard the RPM/speed replies. Clearing DTCs
+temporarily allows functional replies, restores the filter on success or
+failure, and reports PCM rejections. The panel scrolls at smaller window sizes
+and records connection, command and release progress in its own log.
+A single connected OBDX Pro GT is selected automatically using its stable
+Linux device path. Multiple GT adapters still require a port selection.
+
+On 2026-11-19, the connected OS 12587811 PCM accepted Fan 1 on/off, Fan 2 on/off
+and release requests, confirming automatic release after each two-second test.
+Those replies confirm request acceptance; relay wiring and physical fan
+movement require observation at the vehicle. DTC clearing was exercised with
+emulated positive and negative replies; existing vehicle codes were preserved.
 
 CASE learn, fuel trim reset, fuel pump, loop, idle, AFR, spark and cylinder
 balance frames are available for offline inspection.

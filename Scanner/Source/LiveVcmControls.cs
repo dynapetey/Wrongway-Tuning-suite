@@ -60,23 +60,41 @@ sealed partial class HammerdroidProbe
 
     private async Task RequireEngineStopped()
     {
-        byte[]? rpm = await ReadSaeValue(0x0C, 2);
-        byte[]? speed = await ReadSaeValue(0x0D, 1);
+        byte[]? rpm = await ReadControlPid(0x000C, 2);
+        byte[]? speed = await ReadControlPid(0x000D, 1);
         if (rpm is null || speed is null)
             throw new IOException("The PCM must report engine RPM and vehicle speed before this operation.");
-        if (rpm[5] != 0 || rpm[6] != 0 || speed[5] != 0)
+        if (rpm[6] != 0 || rpm[7] != 0 || speed[6] != 0)
             throw new IOException("Park the vehicle and switch the engine off. Leave the ignition on.");
     }
 
-    private Task<byte[]?> ReadSaeValue(byte pid, int bytes)
+    private Task<byte[]?> ReadControlPid(ushort pid, int bytes)
     {
-        int length = 5 + bytes;
-        return ReadPidReply([0x68, 0x6A, 0xF0, 0x01, pid],
-            reply => reply[0] is 0x48 or 0x68 && reply[3] == 0x41 && reply[4] == pid &&
-                (reply.Length == length || reply.Length == length + 1 && HasVpwCrc(reply)), 750);
+        // The adapter's F0 destination filter drops functional SAE replies to 6B.
+        // P01/P59 provide the same status through addressed GM Mode $22 PIDs.
+        byte high = (byte)(pid >> 8), low = (byte)pid;
+        int length = 6 + bytes;
+        return ReadPidReply([0x6C, 0x10, 0xF0, 0x22, high, low, 0x01],
+            reply => (reply.Length == length || reply.Length == length + 1 && HasVpwCrc(reply)) &&
+                reply[0] == 0x6C && reply[3] == 0x62 && reply[4] == high && reply[5] == low, 750);
     }
 
     private async Task<string> ExchangeControl(VcmControlAction action)
+    {
+        // Mode $04 replies use functional destination 6B. Software still checks
+        // the PCM source and destination; restore the F0 hardware filter afterward.
+        bool functional = action == VcmControlAction.ClearTroubleCodes;
+        if (functional)
+            await Command(0x33, [0x00, 0xF0, 0x00]);
+        try { return await ExchangeControlReply(action); }
+        finally
+        {
+            if (functional)
+                await Command(0x33, [0x00, 0xF0, 0x01]);
+        }
+    }
+
+    private async Task<string> ExchangeControlReply(VcmControlAction action)
     {
         byte[] request = VcmTelemetryControls.BuildVpwCommand(new(action));
         await serial.Send(Encode(0x10, request));
@@ -87,9 +105,8 @@ sealed partial class HammerdroidProbe
             if (command is not (0x08 or 0x09) || reply.Length < 4 || reply[2] != 0x10)
                 continue;
             bool functional = action == VcmControlAction.ClearTroubleCodes;
-            bool addressed = functional
-                ? reply[0] is 0x48 or 0x68 && reply[1] is 0x6B or 0xF0
-                : reply[0] == 0x6C && reply[1] == 0xF0;
+            bool addressed = reply[0] == 0x6C && reply[1] == 0xF0 ||
+                functional && reply[0] is 0x48 or 0x68 && reply[1] is 0x6B or 0xF0;
             if (!addressed)
                 continue;
 

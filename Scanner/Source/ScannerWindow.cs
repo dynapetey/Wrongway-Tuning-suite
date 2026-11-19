@@ -242,6 +242,13 @@ sealed partial class ScannerWindow : Window
         recordedOnly.IsCheckedChanged += (_, _) => PopulateChannels();
         ecmOnly.IsCheckedChanged += (_, _) => PopulateChannels();
         port.TextChanged += (_, _) => ClearPidDiscovery();
+        if (OperatingSystem.IsLinux())
+        {
+            string[] gtPorts = LiveScanner.Ports().Where(path =>
+                Path.GetFileName(path).Contains("OBDX_Pro_GT", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (gtPorts.Length == 1)
+                port.Text = gtPorts[0];
+        }
         KeyDown += async (_, args) =>
         {
             if (args.Key == Key.O && args.KeyModifiers.HasFlag(KeyModifiers.Control))

@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 
 namespace WrongWay;
 
@@ -89,7 +90,11 @@ sealed partial class ScannerWindow
                     VcmControlResult? result = null;
                     bool success = await RunHardware(async token =>
                     {
-                        result = await HammerdroidProbe.RunVcmControl(device, action, PostStatus, token);
+                        result = await HammerdroidProbe.RunVcmControl(device, action, message =>
+                        {
+                            PostStatus(message);
+                            Dispatcher.UIThread.Post(() => AppendLog(message));
+                        }, token);
                     }, recording: false, completion: label + " complete.");
                     if (success && result is not null)
                     {
@@ -204,22 +209,25 @@ sealed partial class ScannerWindow
         var root = new Grid
         {
             Margin = new Thickness(14),
-            RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto"),
+            RowDefinitions = new RowDefinitions("*,Auto"),
             RowSpacing = 12
         };
-        Put(root, DeskUi.FrameOf(specialSection, DeskUi.Surface, new Thickness(10)), 0);
-        Put(root, DeskUi.FrameOf(relaySection, DeskUi.Surface, new Thickness(10)), 1);
-        Put(root, DeskUi.FrameOf(engineSection, DeskUi.Surface, new Thickness(10)), 2);
-        Put(root, DeskUi.FrameOf(new ScrollViewer
+        var sections = new StackPanel { Spacing = 12 };
+        sections.Children.Add(DeskUi.FrameOf(specialSection, DeskUi.Surface, new Thickness(10)));
+        sections.Children.Add(DeskUi.FrameOf(relaySection, DeskUi.Surface, new Thickness(10)));
+        sections.Children.Add(DeskUi.FrameOf(engineSection, DeskUi.Surface, new Thickness(10)));
+        sections.Children.Add(DeskUi.FrameOf(new ScrollViewer
         {
             Content = logBox,
-            Padding = new Thickness(10)
-        }, DeskUi.ChartBackground), 3);
+            Padding = new Thickness(10),
+            Height = 180
+        }, DeskUi.ChartBackground));
+        Put(root, new ScrollViewer { Content = sections }, 0);
 
         var close = Button("Close", dialog.Close);
         var footer = Row(stop, close);
         footer.HorizontalAlignment = HorizontalAlignment.Right;
-        Put(root, footer, 4);
+        Put(root, footer, 1);
 
         dialog.Content = root;
         await dialog.ShowDialog(this);
