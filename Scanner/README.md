@@ -247,6 +247,24 @@ Three switches with masks wider than their defined storage appear under
 **Skipped XDF items**. The tuning editor works with offline BIN files.
 PCM flashing uses a separate workflow.
 
+## Tuner Maths
+
+In the tuning editor, select editable numeric cells and click **Maths**, or
+choose **Maths → Apply formula to selection**. Choose a preset or enter a
+formula, set its constant, and click **Preview**. The preview shows the decoded
+values after storage rounding and validates the entire selection. Click
+**Apply to selection** to commit one undoable edit.
+
+Use `[X]` for each current decoded cell, `[K]` for the constant, and `[B]`
+for the matching cell in an opened comparison BIN. `[Row]` and `[Column]`
+read numeric XDF axis labels. For example, `[X] * (1 + [K] / 100)` applies a
+percentage correction, and `[X] + ([B] - [X]) * [K] / 100` blends toward the
+comparison. The expression engine supports arithmetic, comparisons, `if`,
+`min`, `max`, `abs`, `pow`, `sqrt`, `round` and `clamp`.
+
+**Maths → Edit maths presets** adds, edits and removes reusable formulas.
+Presets are saved in `~/.config/wrongway-suite/tuner-maths.json`.
+
 ## User Defined Parameters
 
 With a validated P59 BIN open, select **Edit → User Defined Parameters**.

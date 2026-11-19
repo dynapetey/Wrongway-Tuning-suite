@@ -28,10 +28,14 @@ static class Program
                 Console.WriteLine("Formula, VCM window methods, voltage units and time alignment checks passed.");
                 VcmTelemetryControls.SelfTest();
                 Console.WriteLine("VCM frame preview and XML import checks passed.");
+                TuneMaths.SelfTest();
+                Console.WriteLine("Tuner maths presets and formula inputs passed.");
                 if (args.Length == 2)
                 {
                     UserTuneParameter.SelfTest(args[1]);
+                    TuneMaths.SelfTest(args[1]);
                     Console.WriteLine("User-defined parameters, protected ranges and BIN checksum checks passed.");
+                    Console.WriteLine("Tuner maths preview, selection, axis inputs, validation and Undo checks passed.");
                 }
                 return 0;
             }

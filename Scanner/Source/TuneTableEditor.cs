@@ -28,7 +28,7 @@ sealed partial class TuneWindow
         TableAction("Select all", SelectAllCells),
         TableAction("Copy", () => CopyCells(false)), TableAction("Copy with axes", () => CopyCells(true)),
         TableAction("Paste", () => PasteCells(TunePaste.Replace)), PasteSpecialMenu(), new Separator(),
-        TransformMenu(false), TransformMenu(true), new Separator(),
+        TransformMenu(false), TransformMenu(true), TableAction("Maths formula…", ApplyMaths), new Separator(),
         TableAction("Increase decimal precision", () => SetPrecision(1)),
         TableAction("Decrease decimal precision", () => SetPrecision(-1)),
         TableAction("Use XDF precision", () => { precision = null; Paint(resetEntry: false); }),
@@ -42,7 +42,7 @@ sealed partial class TuneWindow
         DeskUi.Menu("Copy axis labels", TableAction("Row axis", () => CopyAxis(true)),
             TableAction("Column axis", () => CopyAxis(false))),
         TableAction("Paste", () => PasteCells(TunePaste.Replace)), PasteSpecialMenu(), new Separator(),
-        TransformMenu(false), TransformMenu(true), new Separator(),
+        TransformMenu(false), TransformMenu(true), TableAction("Maths formula…", ApplyMaths), new Separator(),
         TableAction("Undo", () => ChangeHistory(false)), TableAction("Redo", () => ChangeHistory(true)),
         TableAction("Restore table from opened BIN", RestoreTable)
     }};

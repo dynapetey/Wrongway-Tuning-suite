@@ -54,7 +54,7 @@ sealed partial class TuneWindow : Window
     {
         ItemsSource = new[] { "Set to", "Add", "Multiply", "Change by %" }, SelectedIndex = 0, Width = 107
     };
-    private readonly Button pickXdf, compare, save, undo, redo, apply, applyText, warnings, userDefined, applyHistogram;
+    private readonly Button pickXdf, compare, save, undo, redo, apply, applyText, warnings, userDefined, applyHistogram, maths;
     private readonly HistogramSnapshot? histogramSnapshot;
     private readonly Border editStrip, textStrip;
     private readonly Grid mapRows, mapTop;
@@ -114,6 +114,7 @@ sealed partial class TuneWindow : Window
         warnings = MakeButton("Skipped XDF items", ShowSkipped);
         userDefined = MakeButton("User Defined Parameters", EditUserParameters);
         applyHistogram = MakeButton("Apply Histogram", ApplyHistogram);
+        maths = MakeButton("Maths", ApplyMaths);
         apply = MakeButton("Apply", Apply);
         applyText = MakeButton("Apply text", ApplyText);
         entry.KeyDown += (_, args) =>
@@ -160,12 +161,16 @@ sealed partial class TuneWindow : Window
                     DeskUi.Action("User Defined Parameters", userDefined),
                     DeskUi.Action("Apply Histogram…", applyHistogram)),
                 MakeTableMenu(),
+                DeskUi.Menu("_Maths", DeskUi.Action("Apply formula to selection…", maths),
+                    TableAction("Edit maths presets…", EditMathsPresets),
+                    DeskUi.Action("User Defined Parameters…", userDefined),
+                    DeskUi.Action("Apply Histogram…", applyHistogram)),
                 DeskUi.Menu("_View", TableAction("Table only", () => { tableOnly = true; ArrangeEditor(); }),
                     TableAction("Maps and table", () => { tableOnly = false; ArrangeEditor(); }),
                     DeskUi.Action("Compare BIN", compare), DeskUi.Action("Skipped XDF items", warnings))
             }
         };
-        var toolbar = Row(open, pickXdf, save, compare, undo, redo, userDefined, applyHistogram, warnings);
+        var toolbar = Row(open, pickXdf, save, compare, undo, redo, maths, userDefined, applyHistogram, warnings);
         var header = new StackPanel { Spacing = 2, Children = { title, details } };
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
         var textLabel = DeskUi.Label("Decoded text", 12, Accent);
@@ -844,6 +849,7 @@ sealed partial class TuneWindow : Window
     {
         pickXdf.IsEnabled = image is not null;
         userDefined.IsEnabled = image is not null && userDefinitionsReadable;
+        maths.IsEnabled = image is not null && current is { Editable: true, IsText: false, Mask: 0, Display: TuneFormat.Number };
         applyHistogram.IsEnabled = image is not null && histogramSnapshot is not null &&
             current is { Editable: true, IsText: false, Mask: 0 } && (current.Rows > 1 || current.Columns > 1);
         compare.IsEnabled = image is not null;
