@@ -115,14 +115,14 @@ static class Program
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--vcm-control-live")
-                throw new ArgumentException("Usage: --vcm-control-live /dev/ttyACM0 ACTION --confirm");
+                throw new ArgumentException("Usage: --vcm-control-live DEVICE ACTION --confirm");
             if (args is ["--serial-test", var port])
             {
                 LiveScanner.SerialTest(port).GetAwaiter().GetResult();
-                Console.WriteLine("Linux serial loopback passed.");
+                Console.WriteLine("Serial loopback passed.");
                 return 0;
             }
-            if (args is [var probe, var device] && probe is "--probe-gt" or "--identify-gt" or "--discover-gt")
+            if (args is [var probe, var device] && probe is "--probe-gt" or "--identify-gt" or "--discover-gt" or "--read-dtcs")
             {
                 using var cancellation = new CancellationTokenSource();
                 Console.CancelKeyPress += (_, eventArgs) =>
@@ -130,6 +130,13 @@ static class Program
                     eventArgs.Cancel = true;
                     cancellation.Cancel();
                 };
+                if (probe == "--read-dtcs")
+                {
+                    var codes = HammerdroidProbe.ReadCodes(device, Console.Error.WriteLine, cancellation.Token)
+                        .GetAwaiter().GetResult();
+                    Console.WriteLine(JsonSerializer.Serialize(codes));
+                    return 0;
+                }
                 if (probe == "--discover-gt")
                 {
                     var discovery = HammerdroidProbe.DiscoverPids(device, Console.Error.WriteLine, cancellation.Token)
@@ -190,7 +197,7 @@ static class Program
                 Console.Error.WriteLine("WrongWayScanner --catalog [OS] | --scanner-status | --telemetry-sessions");
                 Console.Error.WriteLine("WrongWayScanner --telemetry-export LOG OUTPUT.json | --import-vcm-xml INPUT.xml LAYOUT.json");
                 Console.Error.WriteLine("WrongWayScanner --vcm-control-preview ACTION [VALUE]");
-                Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE | --discover-gt DEVICE");
+                Console.Error.WriteLine("WrongWayScanner --probe-gt DEVICE | --identify-gt DEVICE | --discover-gt DEVICE | --read-dtcs DEVICE");
                 Console.Error.WriteLine("WrongWayScanner --tune BIN XDF | --tune-inspect BIN XDF");
                 return 2;
             }

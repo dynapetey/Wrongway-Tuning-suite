@@ -15,7 +15,7 @@ sealed partial class HammerdroidProbe
 
     private async Task<GtPidDiscovery> ReadAvailablePids(Action<string> status)
     {
-        await EnableVpw();
+        await EnableVpw(0x6B);
         var warnings = new List<string>();
         var standard = new List<uint>();
         bool complete = false;
@@ -23,9 +23,9 @@ sealed partial class HammerdroidProbe
         status("Reading SAE PID support from the ECM…");
         for (int group = 0; group <= 0xE0; group += 0x20)
         {
-            byte[]? reply = await ReadSaePage((byte)group);
+            byte[]? reply = await ReadSaePid((byte)group);
             if (reply is null && group == 0)
-                reply = await ReadSaePage(0);
+                reply = await ReadSaePid(0);
             if (reply is null)
             {
                 warnings.Add(group == 0 ? "The ECM did not return an SAE support bitmap." :
@@ -44,6 +44,7 @@ sealed partial class HammerdroidProbe
             }
         }
 
+        await SetReplyAddress(0xF0);
         uint? os = null;
         try
         {
@@ -88,10 +89,10 @@ sealed partial class HammerdroidProbe
             warnings.Count == 0 ? null : string.Join(" ", warnings));
     }
 
-    private Task<byte[]?> ReadSaePage(byte group) =>
-        ReadPidReply([0x68, 0x6A, 0xF0, 0x01, group],
+    private Task<byte[]?> ReadSaePid(byte pid) =>
+        ReadPidReply([0x68, 0x6A, 0xF1, 0x01, pid],
             frame => frame[0] is 0x48 or 0x68 && frame[3] == 0x41 && frame.Length is 9 or 10 &&
-                     frame[4] == group && (frame.Length == 9 || HasVpwCrc(frame)), 550);
+                     frame[4] == pid && (frame.Length == 9 || HasVpwCrc(frame)), 550);
 
     private async Task<byte[]?> ReadPidReply(byte[] request, Func<byte[], bool> matches, int milliseconds)
     {

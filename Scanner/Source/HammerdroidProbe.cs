@@ -9,8 +9,8 @@ sealed record GtAdapter(string Name, string Firmware, string Hardware, string Se
 sealed record GtPcm(uint OsId, string? Vin);
 sealed record GtInspection(GtAdapter Adapter, GtPcm? Pcm, string? PcmError);
 
-/// <summary>Linux transport for the identification operations in Hammerdroid's DVI/VPW client.</summary>
-sealed partial class HammerdroidProbe(LinuxSerialPort serial, CancellationToken token)
+/// <summary>OBDX serial transport for the diagnostic operations in Hammerdroid's DVI/VPW client.</summary>
+sealed partial class HammerdroidProbe(IPort serial, CancellationToken token)
 {
     private readonly byte[] buffer = new byte[256];
     private int buffered;
@@ -41,10 +41,8 @@ sealed partial class HammerdroidProbe(LinuxSerialPort serial, CancellationToken 
     private static async Task<T> WithAdapter<T>(string device, Action<string> status, CancellationToken token,
         Func<HammerdroidProbe, GtAdapter, Task<T>> operation)
     {
-        if (!device.StartsWith("/dev/", StringComparison.Ordinal))
-            throw new IOException("Choose a Linux USB serial or RFCOMM device.");
         token.ThrowIfCancellationRequested();
-        using var serial = new LinuxSerialPort(device);
+        using var serial = LiveScanner.OpenSerialAdapter(device);
         await serial.OpenAsync(new SerialPortConfiguration { BaudRate = 115200, Timeout = 70 });
         var client = new HammerdroidProbe(serial, token);
         try
@@ -100,13 +98,15 @@ sealed partial class HammerdroidProbe(LinuxSerialPort serial, CancellationToken 
         return new GtAdapter(name, firmware, hardware, serialNumber, measured);
     }
 
-    private async Task EnableVpw()
+    private async Task EnableVpw(byte replyAddress = 0xF0)
     {
-        // Select VPW, set tester address F0, and enable network receive.
+        // Select VPW and set the destination filter before enabling reception.
         await Command(0x31, [0x01, 0x01]);
-        await Command(0x33, [0x00, 0xF0, 0x01]);
+        await SetReplyAddress(replyAddress);
         await Command(0x31, [0x02, 0x01]);
     }
+
+    private Task<byte[]> SetReplyAddress(byte address) => Command(0x33, [0x00, address, 0x01]);
 
     private async Task<uint> ReadPcmOsId(Action<string> status)
     {
