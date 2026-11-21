@@ -65,6 +65,9 @@ static class LiveScanner
 
     public static string[] Ports()
     {
+        if (OperatingSystem.IsWindows())
+            return System.IO.Ports.SerialPort.GetPortNames().Order(StringComparer.OrdinalIgnoreCase).ToArray();
+
         var paths = Directory.EnumerateFiles("/dev")
             .Where(path => path.StartsWith("/dev/ttyUSB", StringComparison.Ordinal) ||
                            path.StartsWith("/dev/ttyACM", StringComparison.Ordinal) ||
@@ -109,7 +112,7 @@ static class LiveScanner
 
     public static async Task SerialTest(string portName)
     {
-        using var port = new LinuxSerialPort(portName);
+        using var port = OpenSerialAdapter(portName);
         await port.OpenAsync(new SerialPortConfiguration { BaudRate = 115200, Timeout = 2000 });
         await port.Send([0x12, 0x34, 0x56]);
         var response = new byte[3];
@@ -206,43 +209,12 @@ static class LiveScanner
         });
     }
 
-    public static async Task<string[]> ReadCodes(string port, Action<string> status, CancellationToken token)
-    {
-        var result = new SortedSet<string>();
-        await WithVehicle(port, status, token, async (vehicle, _) =>
-        {
-            await vehicle.SendMessage(new Message([0x68, 0x6A, 0xF0, 0x03]));
-            bool responded = false;
-            for (int i = 0; i < 12 && !token.IsCancellationRequested; i++)
-            {
-                var message = await vehicle.ReceiveMessage();
-                var data = message?.GetBytes();
-                if (data is null || data.Length < 4 || data[3] != 0x43)
-                    continue;
-                responded = true;
-                for (int j = 4; j + 1 < data.Length; j += 2)
-                {
-                    int a = data[j];
-                    int b = data[j + 1];
-                    if (a != 0 || b != 0)
-                        result.Add($"{"PCBU"[a >> 6]}{(a >> 4) & 3}{a & 15:X}{b:X2}");
-                }
-            }
-            token.ThrowIfCancellationRequested();
-            if (!responded)
-                throw new IOException("The PCM did not reply to the stored-code request.");
-        });
-        return result.ToArray();
-    }
-
     private static async Task WithVehicle(string portName, Action<string> status, CancellationToken token,
         Func<Vehicle, ScannerLogger, Task> run)
     {
-        if (!portName.StartsWith("/dev/", StringComparison.Ordinal))
-            throw new IOException("Enter the adapter’s Linux device path, such as /dev/ttyUSB0.");
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
         var logger = new ScannerLogger(status);
-        using var port = new LinuxSerialPort(portName);
+        using var port = OpenSerialAdapter(portName);
         var device = new OBDXProDevice(port, logger);
         var protocol = new Protocol();
         using var vehicle = new Vehicle(device, protocol, logger, new ToolPresentNotifier(device, protocol, logger), Assets);
@@ -258,6 +230,22 @@ static class LiveScanner
         {
             vehicle.ShutdownSignalSource.Cancel();
         }
+    }
+
+    internal static IPort OpenSerialAdapter(string name)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!name.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+                !uint.TryParse(name.AsSpan(3), NumberStyles.None, CultureInfo.InvariantCulture, out uint number) ||
+                number == 0)
+                throw new IOException("Enter the adapter’s Windows COM port, such as COM3.");
+            return new WindowsSerialPort(name.ToUpperInvariant());
+        }
+
+        if (!name.StartsWith("/dev/", StringComparison.Ordinal))
+            throw new IOException("Enter the adapter’s Linux device path, such as /dev/ttyUSB0.");
+        return new LinuxSerialPort(name);
     }
 
     private static ParameterDatabase Database()

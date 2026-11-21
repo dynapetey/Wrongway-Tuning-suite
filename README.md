@@ -78,6 +78,19 @@ install -m 755 build/scanner/WrongWayScanner Scanner/WrongWayScanner
 The PCM tool uses Python Tk and the bundled Mono backend. Build instructions
 and licensing for that component are in `PCM/README.md`.
 
+## Build the Windows x64 scanner and BIN editor
+
+With the .NET 8 SDK, run from the repository root:
+
+```powershell
+dotnet publish Scanner/Source/WrongWayScanner.csproj -c Release -r win-x64 -o build/windows
+```
+
+Run `build/windows/WrongWayScanner.exe` and keep the published `Assets` folder
+beside it. For live scanning with an OBDX Pro GT over USB, select the COM port
+shown in Windows Device Manager. Offline log viewing and BIN editing are also
+available. The integrated PCM Hammer window and flashing are Linux-only.
+
 ## Create a live USB from Windows
 
 The Windows creator formats a selected USB drive and installs WrongWay Tuning
