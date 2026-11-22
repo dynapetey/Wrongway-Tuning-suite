@@ -56,7 +56,7 @@ class BackendTests(unittest.TestCase):
                 self.assertEqual(code, 0, events)
                 self.assertTrue(events[-1]['success'])
 
-    def test_valid_image_still_requires_separate_backup(self):
+    def test_supplied_backup_must_be_separate(self):
         with tempfile.TemporaryDirectory() as folder:
             image = fixture()
             repair_checksums(image)
@@ -65,6 +65,34 @@ class BackendTests(unittest.TestCase):
             code, events = self.run_backend('write-full', '--confirm', '--file', str(path), '--backup', str(path))
             self.assertNotEqual(code, 0)
             self.assertIn('separate', events[-1]['message'])
+
+    def test_valid_writes_without_backup_reach_port_validation(self):
+        for size in [1048576, 524288]:
+            with tempfile.TemporaryDirectory() as folder:
+                image = fixture(size)
+                repair_checksums(image)
+                path = Path(folder) / 'synthetic-do-not-flash.bin'
+                path.write_bytes(image.data)
+                operations = ['write-calibration', 'write-parameters', 'write-os', 'write-full']
+                if size == 1048576:
+                    operations.append('recover-p59')
+                for op in operations:
+                    with self.subTest(size=size, operation=op):
+                        code, events = self.run_backend(op, '--confirm', '--file', str(path))
+                        self.assertNotEqual(code, 0)
+                        self.assertIn('absolute Linux device', events[-1]['message'])
+
+    def test_invalid_optional_backup_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            image = fixture()
+            repair_checksums(image)
+            path = Path(folder) / 'synthetic-do-not-flash.bin'
+            path.write_bytes(image.data)
+            backup = Path(folder) / 'invalid-backup.bin'
+            backup.write_bytes(bytes(128))
+            code, events = self.run_backend('write-full', '--confirm', '--file', str(path), '--backup', str(backup))
+            self.assertNotEqual(code, 0)
+            self.assertIn('Original backup is invalid', events[-1]['message'])
 
     def test_serial_loopback_native_linux(self):
         master, slave = pty.openpty()

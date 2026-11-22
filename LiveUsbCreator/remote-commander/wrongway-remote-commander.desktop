@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Remote Desktop Commander
+Comment=Start the paired remote connection for the WrongWay live USB
+Exec=/usr/local/bin/wrongway-remote-commander
+TryExec=/usr/local/bin/wrongway-remote-commander
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10
+StartupNotify=false

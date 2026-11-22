@@ -27,9 +27,9 @@ CRC replies and erase replies also retain their longer receive windows;
 the backend waits for a pending CRC response before retransmitting a query.
 
 For an OS missing from the bundled lookup, hardware ID `12589162` enables the
-P59 read protocol. An OS-and-calibration write additionally requires a valid
-P59 backup matching the connected PCM's current OS and serial number, and a
-supported P59 target.
+P59 read protocol. An OS-and-calibration write additionally requires a supported P59 target.
+An original backup is optional; when supplied, it must validate and match the
+connected PCM's current OS and serial number.
 The same hardware and serial checks allow read-only CRC comparison of an
 unknown-OS backup. Any mismatched CRC makes that comparison fail.
 This path retains flash-chip size and CRC checks and preserves parameter
@@ -91,9 +91,11 @@ Available operations:
 | Trouble codes | Standard emissions mode-03 request, code labels such as P0300 |
 | Clear codes | Upstream clear request; read again to confirm |
 
-Actual writes require a separate valid original backup, valid target checksums,
-an explicit review and confirmation, and any additional upstream risk prompts.
-Calibration/parameter files and backups must have matching OS IDs. The library
+Actual writes require valid target checksums, an explicit review and
+confirmation, and any additional upstream risk prompts. Original backups are
+optional. A supplied backup must be a separate valid file from the same
+controller family; calibration/parameter files and supplied backups must have
+matching OS IDs. The library
 performs further connected-PCM checks. The desktop blocks closing/disconnecting
 during a flash. It does not automatically approve upstream warning prompts.
 

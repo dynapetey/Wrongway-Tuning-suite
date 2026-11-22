@@ -247,10 +247,10 @@ public static class LinuxBackend
             if(kind!=PcmType.P01 && kind!=PcmType.P59) throw new Exception("This build supports P01/P59 images only.");
             if(!validator.IsValid()) throw new Exception("BIN checksum or layout validation failed.");
             if(op=="validate") { JsonLogger.Emit(new {type="result", success=true, controller=kind.ToString(), osid=validator.GetOsidFromImage()}); return 0; }
-            if(mutates)
+            if(mutates && !string.IsNullOrWhiteSpace(Get(opts,"--backup")))
             {
                 string backup=Get(opts,"--backup");
-                if(backup==null || Path.GetFullPath(backup)==Path.GetFullPath(file)) throw new Exception("Choose a separate original PCM backup with --backup.");
+                if(Path.GetFullPath(backup)==Path.GetFullPath(file)) throw new Exception("Choose a separate original PCM backup with --backup.");
                 var saved=new FileValidator(File.ReadAllBytes(backup),logger);
                 if(!saved.IsValid() || saved.GetFileType()!=kind) throw new Exception("Original backup is invalid or belongs to another controller family.");
                 if((op=="write-calibration" || op=="write-parameters") && saved.GetOsidFromImage()!=validator.GetOsidFromImage()) throw new Exception("Calibration/parameter writes require matching backup and tune operating systems.");
@@ -397,22 +397,27 @@ public static class LinuxBackend
             target.GetFileType() != PcmType.P59 ||
             (!comparingBackup && new OSIDInfo(target.GetOsidFromImage()).HardwareType != PcmType.P59))
             throw new IOException("The unrecognized PCM OS requires verified P59 hardware and a supported P59 target image.");
-        if (!comparingBackup && (string.IsNullOrWhiteSpace(backup) || Path.GetFullPath(backup) == Path.GetFullPath(file)))
-            throw new IOException("Choose a separate original PCM backup with --backup.");
-        byte[] original = File.ReadAllBytes(comparingBackup ? file : backup);
-        var saved = new FileValidator(original, logger);
-        if (!saved.IsValid() || saved.GetFileType() != PcmType.P59 || saved.GetOsidFromImage() != os.Value)
-            throw new IOException("The P59 backup must validate and match the connected PCM's current OS.");
-        var serial = await vehicle.QuerySerial();
-        if (serial.Status != ResponseStatus.Success || string.IsNullOrWhiteSpace(serial.Value) ||
-            !System.Text.Encoding.ASCII.GetString(original, 0x4000, 0x4000).Contains(serial.Value.Trim()))
-            throw new IOException("The original P59 backup must contain the connected PCM's serial number.");
+        // An original backup is optional. Validate its provenance only when supplied;
+        // comparison continues to validate the selected comparison image.
+        if (comparingBackup || !string.IsNullOrWhiteSpace(backup))
+        {
+            if (!comparingBackup && Path.GetFullPath(backup) == Path.GetFullPath(file))
+                throw new IOException("Choose a separate original PCM backup with --backup.");
+            byte[] original = File.ReadAllBytes(comparingBackup ? file : backup);
+            var saved = new FileValidator(original, logger);
+            if (!saved.IsValid() || saved.GetFileType() != PcmType.P59 || saved.GetOsidFromImage() != os.Value)
+                throw new IOException("The P59 backup must validate and match the connected PCM's current OS.");
+            var serial = await vehicle.QuerySerial();
+            if (serial.Status != ResponseStatus.Success || string.IsNullOrWhiteSpace(serial.Value) ||
+                !System.Text.Encoding.ASCII.GetString(original, 0x4000, 0x4000).Contains(serial.Value.Trim()))
+                throw new IOException("The original P59 backup must contain the connected PCM's serial number.");
+        }
 
         // The OS catalog is incomplete; identify this controller using its independent hardware ID.
         // Keep upstream flash-chip size, kernel OS-response and per-range CRC verification intact.
         // OS+calibration preserves parameter blocks. Compare never erases or writes flash.
         var info = new OSIDInfo(PcmType.P59);
-        logger.AddUserMessage("Verified P59 hardware 12589162 and original OS " + os.Value + " backup. Using the P59 kernel for " + kind + ".");
+        logger.AddUserMessage("Verified P59 hardware 12589162; connected OS " + os.Value + ". Using the P59 kernel for " + kind + ".");
         int rpm = await ReadPreflightPid(vehicle, 0x000C, token);
         int speed = await ReadPreflightPid(vehicle, 0x000D, token);
         if (rpm != 0 || speed != 0)

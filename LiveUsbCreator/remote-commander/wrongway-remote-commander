@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+umask 077
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/wrongway-remote"
+mkdir -p "$state_dir"
+exec 9>"$state_dir/session.lock"
+flock -n 9 || exit 0
+log="$state_dir/remote.log"
+if [ -f "$log" ]; then mv -f "$log" "$log.previous"; fi
+exec >>"$log" 2>&1
+printf 'Starting Remote Desktop Commander at %s\n' "$(date -Is)"
+export PATH="/opt/wrongway-remote:/usr/local/bin:/usr/bin:/bin:$PATH"
+trap 'exit 0' INT TERM
+while :; do
+    /opt/wrongway-remote/node /opt/wrongway-remote/node_modules/@wonderwhy-er/desktop-commander/dist/index.js remote || true
+    printf 'Commander exited; retrying in 15 seconds at %s\n' "$(date -Is)"
+    sleep 15
+done

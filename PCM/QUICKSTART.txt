@@ -5,7 +5,7 @@ Start with your original PCM backup
 3. Read full backup to a new filename. Keep a separate untouched copy.
 4. Open the BIN. Import an XDF matching its OS, or add custom definitions.
 5. Confirm the match, edit, repair checksums, and Save BIN as.
-6. Validate the saved file, Test write, then Review & write with the original backup.
+6. Validate the saved file, Test write, then Review & write. No original backup is required.
 
 Available here
 

@@ -468,9 +468,9 @@ class App(tk.Tk):
         ttk.Label(self.pcm, textvariable=self.properties, wraplength=1160, padding=(0, 12)).pack(fill='x')
         flash = ttk.LabelFrame(self.pcm, text='Validate & write', padding=10)
         flash.pack(fill='x', pady=(0, 10))
-        self.flash_file, self.backup_file = tk.StringVar(), tk.StringVar()
+        self.flash_file = tk.StringVar()
         self.flash_mode = tk.StringVar(value='Calibration only')
-        for row, (label, var) in enumerate([('Edited BIN', self.flash_file), ('Original backup', self.backup_file)]):
+        for row, (label, var) in enumerate([('Edited BIN', self.flash_file)]):
             ttk.Label(flash, text=label).grid(row=row, column=0, sticky='w', padx=(0, 10), pady=5)
             ttk.Entry(flash, textvariable=var).grid(row=row, column=1, sticky='ew', pady=5)
             ttk.Button(flash, text='Choose', command=lambda v=var: self.choose(v, [('PCM BIN', '*.bin')])).grid(row=row, column=2, padx=8)
@@ -522,16 +522,13 @@ class App(tk.Tk):
 
     def flash(self):
         options = self.file_options()
-        backup = self.backup_file.get().strip()
-        if not backup or not Path(backup).is_file():
-            raise ValueError('Choose the separate original backup before writing.')
-        options.update({'backup': str(Path(backup).absolute()), 'confirm': True})
+        options['confirm'] = True
         mode = self.flash_mode.get()
         op = {'Calibration only': 'write-calibration', 'Parameters only': 'write-parameters', 'OS + calibration + boot': 'write-os', 'Full clone': 'write-full', 'P59 recovery': 'recover-p59'}[mode]
         controller, osid, report = core.checksum_report(Path(options['file']).read_bytes())
         if not all(s['valid'] for s in report):
             raise ValueError('Repair and save BIN checksums before writing.')
-        text = f'{mode}\n{controller} / File OS {osid}\n{self.adapter.get()} at {self.port.get()}\n\nTune: {options["file"]}\nBackup: {options["backup"]}\n\nUse stable battery support, ignition ON and engine OFF. Keep the cable connected until completion. This Linux release has not been verified on a real PCM.\n\nBegin this write?'
+        text = f'{mode}\n{controller} / File OS {osid}\n{self.adapter.get()} at {self.port.get()}\n\nTune: {options["file"]}\n\nUse stable battery support, ignition ON and engine OFF. Keep the cable connected until completion. This Linux release has not been verified on a real PCM.\n\nBegin this write?'
         if messagebox.askyesno('Review PCM write', text, parent=self):
             self.run_pcm(op, options)
 
@@ -594,8 +591,6 @@ class App(tk.Tk):
             success = event['code'] == 0 and self.runner.last_result and self.runner.last_result.get('success')
             self.status.set(('Completed: ' if success else 'Ended: ') + event['operation'] + f' • exit {event["code"]}')
             self.append_session(self.status.get())
-            if success and event['operation'] == 'read' and self.last_read:
-                self.backup_file.set(self.last_read)
             if success and event['operation'] == 'log' and self.last_log:
                 self.open_log(self.last_log)
         elif kind == 'activity':
