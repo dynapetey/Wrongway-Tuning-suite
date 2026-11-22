@@ -154,7 +154,8 @@ static class LiveScanner
                 if (!await scanner.StartLogging())
                     throw new IOException("The PCM did not start streaming live data.");
                 using var writer = new StreamWriter(new FileStream(path, FileMode.CreateNew, FileAccess.Write));
-                writer.AutoFlush = true;
+                writer.AutoFlush = false;
+                long lastFlushMs = 0;
                 var clock = Stopwatch.StartNew();
                 LiveColumn[]? columns = null;
                 int[]? order = null;
@@ -196,6 +197,11 @@ static class LiveScanner
                     var values = order!.Select(index => CsvLog.ParseReading(milliseconds, row[index].ValueAsString)).ToArray();
                     writer.WriteLine((milliseconds / 1000d).ToString("0.000", CultureInfo.InvariantCulture)
                         + "," + string.Join(",", values.Select(value => CsvLog.Escape(value.CsvValue))));
+                    if (milliseconds - lastFlushMs >= 1000)
+                    {
+                        await writer.FlushAsync(token);
+                        lastFlushMs = milliseconds;
+                    }
                     reading(new LiveReading(milliseconds, columns, values));
                 }
             }

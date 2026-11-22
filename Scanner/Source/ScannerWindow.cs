@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using Avalonia;
@@ -64,6 +65,10 @@ sealed partial class ScannerWindow : Window
     private GtPidDiscovery? pidDiscovery;
     private long cursor;
     private long playOrigin;
+    private readonly ConcurrentQueue<LiveReading> liveQueue = new();
+    private int liveQueueSize;
+    private int liveDrainScheduled;
+    private long skippedDisplayFrames;
 
     public ScannerWindow()
     {
@@ -829,6 +834,10 @@ sealed partial class ScannerWindow : Window
             return;
         }
         uint? recordedOs = null;
+        while (liveQueue.TryDequeue(out _)) { }
+        Interlocked.Exchange(ref liveQueueSize, 0);
+        Interlocked.Exchange(ref liveDrainScheduled, 0);
+        Interlocked.Exchange(ref skippedDisplayFrames, 0);
         await RunHardware(async token =>
         {
             await LiveScanner.Record(device, selection, custom, path, PostStatus,
@@ -837,7 +846,7 @@ sealed partial class ScannerWindow : Window
                     recordedOs = os;
                     Dispatcher.UIThread.Post(() => IdentifyOs(os));
                 },
-                reading => Dispatcher.UIThread.Post(() => AppendLive(next, reading)), token);
+                reading => QueueLive(next, reading), token);
         }, recording: true);
         if (next.Frames > 0)
         {
@@ -848,6 +857,40 @@ sealed partial class ScannerWindow : Window
             {
                 SetStatus("Log recorded. Telemetry session could not be indexed: " + ex.Message, true);
             }
+        }
+    }
+
+    // Never block PCM polling or CSV recording on the Avalonia render thread.
+    // When rendering falls behind, discard display frames only, not CSV samples.
+    private void QueueLive(ScanLog next, LiveReading reading)
+    {
+        liveQueue.Enqueue(reading);
+        Interlocked.Increment(ref liveQueueSize);
+        while (Volatile.Read(ref liveQueueSize) > 512 && liveQueue.TryDequeue(out _))
+        {
+            Interlocked.Decrement(ref liveQueueSize);
+            Interlocked.Increment(ref skippedDisplayFrames);
+        }
+        if (Interlocked.CompareExchange(ref liveDrainScheduled, 1, 0) == 0)
+            Dispatcher.UIThread.Post(() => DrainLive(next), DispatcherPriority.Background);
+    }
+
+    private void DrainLive(ScanLog next)
+    {
+        int processed = 0;
+        while (processed < 64 && liveQueue.TryDequeue(out var sample))
+        {
+            Interlocked.Decrement(ref liveQueueSize);
+            AppendLive(next, sample);
+            processed++;
+        }
+        if (!liveQueue.IsEmpty)
+            Dispatcher.UIThread.Post(() => DrainLive(next), DispatcherPriority.Background);
+        else
+        {
+            Interlocked.Exchange(ref liveDrainScheduled, 0);
+            if (!liveQueue.IsEmpty && Interlocked.CompareExchange(ref liveDrainScheduled, 1, 0) == 0)
+                Dispatcher.UIThread.Post(() => DrainLive(next), DispatcherPriority.Background);
         }
     }
 
