@@ -73,8 +73,13 @@ def adapter(fd, corrupt=False, adc_channel=0):
         os.write(fd, packet[:2])
         os.write(fd, packet[2:])
 
-def enable_vpw(fd):
-    for command, payload in [(0x31, b'\x01\x01'), (0x33, b'\x00\xf0\x01'), (0x31, b'\x02\x01')]:
+def set_reply_address(fd, address):
+    payload = bytes([0, address, 1])
+    expect(fd, frame(0x33, payload))
+    os.write(fd, frame(0x43, payload))
+
+def enable_vpw(fd, address=0xf0):
+    for command, payload in [(0x31, b'\x01\x01'), (0x33, bytes([0, address, 1])), (0x31, b'\x02\x01')]:
         expect(fd, frame(command, payload))
         os.write(fd, frame(command + 0x10))
 
@@ -305,13 +310,14 @@ assert 0x1141 in gm_candidates
 with session('--discover-gt') as (fd, p):
     elm(fd)
     adapter(fd)
-    enable_vpw(fd)
-    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x00'))
+    enable_vpw(fd, 0x6b)
+    expect(fd, frame(0x10, b'\x68\x6a\xf1\x01\x00'))
     sae_page(fd, 0, [1], source=0x18)
     sae_page(fd, 0x20, [0x23])
     sae_page(fd, 0, [0x0c, 0x11, 0x20])
-    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x20'))
+    expect(fd, frame(0x10, b'\x68\x6a\xf1\x01\x20'))
     sae_page(fd, 0x20, [0x22], add_crc=True)
+    set_reply_address(fd, 0xf0)
     want_pcm(fd, 10)
     reply(fd, 10, (12587811).to_bytes(4, 'big'))
 
@@ -338,10 +344,11 @@ print('PASS ECM SAE pages and GM discovery, other modules ignored, timeout and n
 with session('--discover-gt') as (fd, p):
     elm(fd)
     adapter(fd)
-    enable_vpw(fd)
-    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x00'))
+    enable_vpw(fd, 0x6b)
+    expect(fd, frame(0x10, b'\x68\x6a\xf1\x01\x00'))
     sae_page(fd, 0, [0x0c, 0x20])
-    expect(fd, frame(0x10, b'\x68\x6a\xf0\x01\x20'))
+    expect(fd, frame(0x10, b'\x68\x6a\xf1\x01\x20'))
+    set_reply_address(fd, 0xf0)
     want_pcm(fd, 10)
     os.write(fd, frame(8, b'\x6c\xf0\x10\x7f\x3c\x22'))
     expect(fd, frame(0x25))
@@ -352,3 +359,51 @@ with session('--discover-gt') as (fd, p):
     assert discovery['OsId'] is None and discovery['GmProbed'] == 0, discovery
     assert 'page 0x20' in discovery['Warning'], discovery
 print('PASS incomplete SAE pages report partial support and an unidentified OS skips enhanced probing.')
+
+@contextmanager
+def dtc_session(count):
+    with session('--read-dtcs') as (fd, p):
+        elm(fd)
+        adapter(fd)
+        enable_vpw(fd, 0x6b)
+        expect(fd, frame(0x10, bytes.fromhex('68 6A F1 01 01')))
+        if count is not None:
+            monitor = bytes.fromhex('48 6B 10 41 01') + bytes([0x80 | count, 0, 0, 0])
+            os.write(fd, frame(8, monitor + vpw_crc(monitor)))
+        if count != 0:
+            expect(fd, frame(0x10, bytes.fromhex('68 6A F1 03')))
+        yield fd, p
+
+def finish_codes(fd, p, codes=None, error=None):
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    if error:
+        assert p.returncode == 1 and error in err, (out, err)
+    else:
+        assert p.returncode == 0 and json.loads(out) == codes, (out, err)
+
+with dtc_session(0) as (fd, p):
+    finish_codes(fd, p, [])
+print('PASS confirmed zero stored codes using PCM monitor status.')
+
+with dtc_session(4) as (fd, p):
+    for data in ['48 6B 18 43 01 11', '48 F0 10 43 02 22', '48 6B 10 7F 03 78',
+                 '48 6B 10 43 01 71 03 00 42 34', '48 6B 10 43 01 71 03 00 42 34']:
+        os.write(fd, frame(8, bytes.fromhex(data)))
+    last = bytes.fromhex('48 6B 10 43 C1 23 00 00 00 00')
+    os.write(fd, frame(9, last + vpw_crc(last)))
+    finish_codes(fd, p, ['C0234', 'P0171', 'P0300', 'U0123'])
+print('PASS four DTCs over multiple replies, duplicate, other module, unrelated destination and optional CRC.')
+
+for label, count, payload, codes, error in [
+    ('mode 03 without monitor count', None, '48 6B 10 43 00 00', [], None),
+    ('unanswered request', None, None, None, 'No stored-code reply'),
+    ('missing codes', 2, '48 6B 10 43 04 20', None, 'returned 1'),
+    ('negative reply', 1, '48 6B 10 7F 03 11', None, 'status 11'),
+    ('bad VPW checksum', 1, '48 6B 10 43 04 20 FF', None, 'VPW checksum'),
+]:
+    with dtc_session(count) as (fd, p):
+        if payload:
+            os.write(fd, frame(8, bytes.fromhex(payload)))
+        finish_codes(fd, p, codes, error)
+    print(f'PASS stored-code handling for {label}.')

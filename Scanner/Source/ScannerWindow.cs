@@ -26,7 +26,7 @@ sealed partial class ScannerWindow : Window
     private readonly TextBox filter = new() { Watermark = "Find a channel or PID" };
     private readonly CheckBox recordedOnly = new() { Content = "Recorded only", MinHeight = 22 };
     private readonly CheckBox ecmOnly = new() { Content = "ECM-supported", MinHeight = 22, IsEnabled = false };
-    private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
+    private readonly TextBox port = new() { Width = 170, Watermark = OperatingSystem.IsWindows() ? "COM3" : "/dev/ttyUSB0" };
     private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
     private readonly Slider slider = new() { Minimum = 0, Maximum = 1, IsEnabled = false };
@@ -72,7 +72,7 @@ sealed partial class ScannerWindow : Window
 
     public ScannerWindow()
     {
-        Title = "WrongWay Scanner + Hammerdroid · Linux";
+        Title = OperatingSystem.IsWindows() ? "WrongWay Scanner + Hammerdroid · Windows 0.4.12 preview" : "WrongWay Scanner + Hammerdroid · Linux";
         Width = 1260;
         Height = 800;
         MinWidth = 900;
@@ -112,7 +112,7 @@ sealed partial class ScannerWindow : Window
         gtButton.Flyout = new MenuFlyout { Items = { inspectAdapter, identifyPcm } };
         pcmToolsButton = Button("PCM & flashing", OpenPcmTools);
         var pcmToolsMenu = DeskUi.Action("PCM & flashing", pcmToolsButton);
-        pcmToolsMenu.IsVisible = File.Exists(PcmLauncher);
+        pcmToolsMenu.IsVisible = OperatingSystem.IsLinux() && File.Exists(PcmLauncher);
         var tuneButton = Button("Tune BIN", async () =>
         {
             var editor = new TuneWindow(CurrentHistogramSnapshot()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
@@ -733,7 +733,9 @@ sealed partial class ScannerWindow : Window
         string[] available = LiveScanner.Ports();
         if (available.Length == 0)
         {
-            SetStatus("No USB or Bluetooth serial port found. Connect the GT or bind its RFCOMM port.", true);
+            SetStatus(OperatingSystem.IsWindows()
+                ? "No COM ports found. Connect the GT and check Ports in Device Manager."
+                : "No USB or Bluetooth serial port found. Connect the GT or bind its RFCOMM port.", true);
             return;
         }
         if (available.Length == 1)
@@ -819,7 +821,7 @@ sealed partial class ScannerWindow : Window
     {
         if (port.Text?.Trim() is not { Length: > 0 } device)
         {
-            SetStatus("Enter the OBDX Pro GT USB serial path first.", true);
+            SetStatus("Select the OBDX Pro GT serial port first.", true);
             return;
         }
         string? path = await PickCsvPath("obdx-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
@@ -933,13 +935,13 @@ sealed partial class ScannerWindow : Window
     {
         if (port.Text?.Trim() is not { Length: > 0 } device)
         {
-            SetStatus("Enter the OBDX Pro GT USB serial path first.", true);
+            SetStatus("Select the OBDX Pro GT serial port first.", true);
             return;
         }
         string[] codes = [];
         bool success = await RunHardware(async token =>
         {
-            codes = await LiveScanner.ReadCodes(device, PostStatus, token);
+            codes = await HammerdroidProbe.ReadCodes(device, PostStatus, token);
         }, recording: false);
         if (success && !closeAfterHardware)
             await Modal("Stored diagnostic trouble codes",
