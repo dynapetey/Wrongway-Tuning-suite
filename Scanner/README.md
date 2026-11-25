@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.12
+# WrongWay Scanner + Hammerdroid 0.4.17
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -25,8 +25,8 @@ on Wayland sessions.
 - **Edit graph** sets the histogram's table label, X, Y and value channels,
   fixed bin widths or explicit breakpoints, mean/minimum/maximum/count,
   minimum samples, and optional VCM `FilterFunction` cell filter expression.
-  Use the **Table:** dropdown in the histogram header to switch between
-  multiple imported or saved histogram tables. The histogram updates during
+  Multiple imported or saved histogram tables appear together. Use the
+  table selector to choose the table to edit or export. The histogram updates during
   recording and displays how many samples were excluded by the active cell filter.
 - **Layout → Import VCM XML…** imports HP Tuners VCM Scanner `*.Channels.xml`,
   `*.Graphs.xml`, `*.Layout.xml`, and `*.MathParameter.xml` files directly into
@@ -104,7 +104,7 @@ Those replies confirm request acceptance; relay wiring and physical fan
 movement require observation at the vehicle. DTC clearing was exercised with
 emulated positive and negative replies; existing vehicle codes were preserved.
 
-CASE learn, fuel trim reset, fuel pump, loop, idle, AFR, spark and cylinder
+CASE learn, fuel trim reset, loop, idle, AFR, spark and cylinder
 balance frames are available for offline inspection.
 
 ```sh
@@ -329,3 +329,77 @@ The GT inspection follows the Hammerdroid Linux protocol workflow at commit
 - [Hammerdroid Linux source](https://github.com/dynapetey/Hammerdroid/tree/04f1c4c06a44174b0e63c3987fb0a47ae66bf3f6/desktop)
 - [OBDX DVI framing reference](https://obdxpro.com/Downloads/ReferenceManuals/OBDX%20Pro%20VT%20Reference%20Guide%20v2.pdf)
 - [BlueZ RFCOMM commands](https://manpages.debian.org/bookworm/bluez/rfcomm.1.en.html)
+
+## Expanded time chart
+
+Select up to 32 simultaneous time traces using the channel checkboxes or Edit
+traces. Each trace has its own color and optional scale. Larger charts scroll
+vertically so labels and values remain readable; Ctrl+mouse wheel zooms time.
+VCM layout imports retain up to 32 distinct time traces. The live recording
+profile still follows the adapter protocol byte budget; plotting more traces
+also supports recorded logs and calculated channels.
+
+## Live fuel-pump relay tests
+
+In Tools → VCM Controls, Pump on (2s) and Pump off (2s) send P59 relay
+commands and wait for the PCM response. The engine must be stopped and the
+vehicle stationary, with ignition on. Each test returns to automatic PCM
+control after two seconds, on Stop, or after an uncertain command response.
+Return pump to PCM is available separately and clears actuator overrides.
+A PCM acknowledgement confirms request acceptance; observe the pump/relay
+for physical operation. Supported OS: 12587603 and 12587811.
+See [firmware evidence](Source/Reference/P59-Fuel-Pump.md).
+
+### Fuel-trim recording and expanded polling (0.4.15)
+
+Custom profiles on P59 OS 12587603/12587811 use bounded single-row polling when
+fuel-trim PIDs 0006–0009 are selected or the inputs exceed 18 bytes. Up to 36
+bytes are packed into six groups FE–F9, requested in batches of at most three.
+Rows missing a group are discarded; unrelated or duplicate groups cannot
+complete a row. The rate depends on bus and adapter response time. Values in a
+polled row are collected sequentially, not a simultaneous snapshot. Other
+profiles retain the existing stream path.
+
+Startup failures retain the library's parameter-specific error. Each new raw
+CSV has a sibling `.diagnostics.log`; gaps longer than 500 ms are reported in
+status and diagnostics. The bounded diagnostic command is:
+
+```
+WrongWayScanner --record-live /dev/ttyUSB0 layout.json new-log.csv 15
+```
+
+The A/C-input wideband AFR formula remains `(volts / 0.5) + 9.57`. Calculated
+AFR is blank for zero or railed voltage, a reported stopped engine, or a
+reported zero ignition voltage. Raw inputs remain recorded unchanged.
+These guards apply to calculated channels; previously exported AFR columns
+remain original recorded data.
+
+Packing, decoding all four trims, missing/duplicate/unrelated responses,
+cancellation, and wideband shutdown/recovery are exercised by self-tests.
+Expanded polling still requires vehicle validation; passing software tests is
+not a claim of confirmed vehicle streaming or corrected engine calibration.
+
+### Installed editor definitions (0.4.16)
+
+The native editor automatically loads
+`$XDG_DATA_HOME/wrongway-suite/definitions/<OS>/definition.xdf` when opening a
+validated BIN (default data root: `~/.local/share`). OS compatibility checks
+still apply. A bad installed definition leaves the BIN open with an error and
+manual XDF loading available. The July 17, 2025 12587811 definition uses the
+native P59 checksum engine on save; its companion Windows TunerPro DLL is
+retained for portability and is not executed by the Linux editor.
+
+## Integrated Linux J2534 and PID audit
+
+The suite launcher starts this scanner. The hardware row selects **Serial (OBDX DVI)**
+(default) or **J2534 (Linux VPW)**. J2534 provides SAE discovery and SAE-only
+FuelTrims/Basics recording. GM enhanced channels and the A/C-input wideband
+continue to use serial DVI.
+
+Linux x64 builds require `gcc` and compile `Native/obdx_j2534.c`; build and publish
+outputs include `libobdx_j2534.so` beside the scanner automatically. See
+[Native/README.md](Native/README.md) for emulator checks and transport limits.
+
+`--self-test` includes 36 raw-byte decoder cases for O2 millivolts, fuel trims,
+oil pressure, RPM, coolant, vehicle speed and fuel-system status. Emulator
+results validate synthetic responses; real PCM streaming is still unverified.

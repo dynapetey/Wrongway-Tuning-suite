@@ -21,7 +21,8 @@ enum VcmControlAction
     CommandAfr,
     CommandSparkAdvance,
     CylinderPowerBalance,
-    ReleaseAllControls
+    ReleaseAllControls,
+    ReleaseFuelPumpControl
 }
 
 sealed record VcmControlRequest(
@@ -57,7 +58,8 @@ static class VcmTelemetryControls
 
     public static bool AvailableLive(VcmControlAction action) => action is
         VcmControlAction.Fan1On or VcmControlAction.Fan1Off or VcmControlAction.Fan2On or
-        VcmControlAction.Fan2Off or VcmControlAction.ReleaseAllControls or VcmControlAction.ClearTroubleCodes;
+        VcmControlAction.Fan2Off or VcmControlAction.ReleaseAllControls or VcmControlAction.ClearTroubleCodes or
+        VcmControlAction.FuelPumpOn or VcmControlAction.FuelPumpOff or VcmControlAction.ReleaseFuelPumpControl;
 
     /// <summary>
     /// Builds the frame for a named control. Only AvailableLive controls can be sent by the scanner.
@@ -83,11 +85,13 @@ static class VcmTelemetryControls
             VcmControlAction.Fan2On => BuildFanCommand(0x40, 0x40),
             VcmControlAction.Fan2Off => BuildFanCommand(0x40, 0x00),
 
-            // Fuel Pump Relay Override (Mode $AE CPID $02: bits 4-5)
-            VcmControlAction.FuelPumpOn =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00],
-            VcmControlAction.FuelPumpOff =>
-                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x02, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00],
+            // P59 CPID $01: bit 2 in the third/fourth data bytes enables/sets the pump relay.
+            // 12587603 loc_3D12E; 12587811 0x415B2. See Reference/P59-Fuel-Pump.md.
+            VcmControlAction.FuelPumpOn => BuildFanCommand(0x04, 0x04),
+            VcmControlAction.FuelPumpOff => BuildFanCommand(0x04, 0x00),
+            // CPID $00 clears all override groups and resets the pump-test timer state.
+            VcmControlAction.ReleaseFuelPumpControl =>
+                [Priority.Physical0, DeviceId.Pcm, DeviceId.Tool, Mode.SpecialFunctions, 0x00, 0, 0, 0, 0, 0, 0],
 
             // Open/Closed Loop Fueling Status Override (Mode $AE CPID $04)
             VcmControlAction.ForceOpenLoop =>
@@ -299,6 +303,11 @@ static class VcmTelemetryControls
 
     public static void SelfTest()
     {
+        if (!BuildVpwCommand(new(VcmControlAction.FuelPumpOn)).SequenceEqual(Convert.FromHexString("6C10F0AE01000004040000"))
+            || !BuildVpwCommand(new(VcmControlAction.FuelPumpOff)).SequenceEqual(Convert.FromHexString("6C10F0AE01000004000000"))
+            || !BuildVpwCommand(new(VcmControlAction.ReleaseFuelPumpControl)).SequenceEqual(Convert.FromHexString("6C10F0AE00000000000000"))
+            || !AvailableLive(VcmControlAction.FuelPumpOn) || !AvailableLive(VcmControlAction.FuelPumpOff))
+            throw new InvalidDataException("P59 pump control and release frame mismatch.");
         byte[] caseFrame = BuildVpwCommand(new VcmControlRequest(VcmControlAction.CrankRelearn));
         if (!caseFrame.SequenceEqual(new byte[] { 0x6C, 0x10, 0xF0, 0xAE, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00 }))
             throw new InvalidDataException("CASE Crank Relearn VPW frame mismatch.");
@@ -338,6 +347,19 @@ static class VcmTelemetryControls
             var importedChannels = VcmConfigImporter.ImportChannelsXml(channelsXml);
             if (importedChannels.Length < 3)
                 throw new InvalidDataException("VCM Channels.xml failed to map P59 channels.");
+
+            string layoutXml = Path.Combine(tempXmlDir, "32-traces.Layout.xml");
+            File.WriteAllText(layoutXml, "<DocumentContents>" + string.Concat(
+                Enumerable.Range(0, ScannerLayout.MaximumTraces).Select(i =>
+                    $"<Series><ParameterID>{90000+i}</ParameterID><Unit>150</Unit></Series>")) + "</DocumentContents>");
+            var expanded = VcmConfigImporter.ImportLayoutXml(layoutXml, ScannerLayout.Default);
+            if (expanded.Traces?.Length != ScannerLayout.MaximumTraces
+                || expanded.Traces.Select(t => t.Color).Distinct().Count() != ScannerLayout.ColorCount
+                || !expanded.IsValid()
+                || TraceChart.SeriesBrushes.Length != ScannerLayout.ColorCount
+                || TraceChart.ColorNames.Length != ScannerLayout.ColorCount
+                || TraceChart.MinimumPlotHeight(32) < 32 * 54)
+                throw new InvalidDataException("32-trace VCM import, palette or scroll height failed.");
 
             string graphsXml = Path.Combine(tempXmlDir, "test.Graphs.xml");
             File.WriteAllText(graphsXml,

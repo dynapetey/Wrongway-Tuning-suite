@@ -8,9 +8,12 @@ namespace WrongWay;
 
 sealed class TraceChart : Control
 {
+    public static readonly string[] ColorNames = ["Mint", "Amber", "Blue", "Pink", "Lime", "Violet", "Cyan", "Coral", "Gold", "Lavender", "Teal", "Rose", "Sky", "Orange", "Green", "Lilac", "Ice", "Peach", "Periwinkle", "Blush", "Chartreuse", "Orchid", "Aqua", "Salmon", "Steel blue", "Sand", "Seafoam", "Plum", "Pale cyan", "Apricot", "Apple", "Silver"];
     public static readonly IBrush[] SeriesBrushes = new[] {
-        "#64E0CD", "#F1AD62", "#8EAAFF", "#EB86BA", "#B5DA77", "#BBA6FD"
+        "#64E0CD", "#F1AD62", "#8EAAFF", "#EB86BA", "#B5DA77", "#BBA6FD", "#42DDF5", "#FF8066", "#E9CD4A", "#D7B8FF", "#39BDAD", "#F768A8", "#4CAFFF", "#F38A35", "#68C96F", "#AA84E8", "#A3EEED", "#FFD1A3", "#BBCBFF", "#FFC1D9", "#D7ED76", "#E3A3EF", "#78F2C3", "#FFAD9B", "#8AB8D8", "#D5BD87", "#9ACFAB", "#C78FAF", "#B6E9FA", "#F4B875", "#A0DB56", "#D6DEE8"
     }.Select(Brush.Parse).ToArray();
+    public const int ScrollThreshold = 6;
+    public static double MinimumPlotHeight(int channels) => Math.Max(170, channels * 54 + 42);
     private static readonly IBrush Grid = Brush.Parse("#30404E");
     private static readonly IBrush Dim = DeskUi.ChartMuted;
     private static readonly IBrush Panel = DeskUi.ChartBackground;
@@ -38,6 +41,8 @@ sealed class TraceChart : Control
         };
         PointerWheelChanged += (_, args) =>
         {
+            if (Channels.Count > ScrollThreshold && !args.KeyModifiers.HasFlag(KeyModifiers.Control))
+                return;
             ZoomAt?.Invoke(Fraction(args), args.Delta.Y > 0 ? 0.7 : 1.4);
             args.Handled = true;
         };
@@ -77,7 +82,7 @@ sealed class TraceChart : Control
         {
             var channel = Channels[i];
             var style = TraceStyles.GetValueOrDefault(channel);
-            var brush = SeriesBrushes[style?.Color ?? i];
+            var brush = SeriesBrushes[(style?.Color ?? i) % SeriesBrushes.Length];
             double y = Top + i * lane;
             context.DrawLine(new Pen(Grid), new Point(0, y + lane), new Point(Bounds.Width, y + lane));
             DrawSeries(context, channel, style, brush, new Rect(Left, y, width, lane), span);

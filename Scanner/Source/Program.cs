@@ -39,6 +39,29 @@ static class Program
                 }
                 return 0;
             }
+            if (args is ["--discover-j2534", var j2534Port])
+            {
+                var result = J2534Gt.Discover(j2534Port, Console.Error.WriteLine, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                Console.WriteLine(JsonSerializer.Serialize(result));
+                return 0;
+            }
+            if (args is ["--record-j2534", var j2534Device, var j2534Profile, var j2534Path, var j2534Seconds])
+            {
+                if (!int.TryParse(j2534Seconds, out int seconds) || seconds is < 1 or > 300)
+                    throw new ArgumentException("J2534 recording duration must be 1–300 seconds.");
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+                int samples = 0;
+                try
+                {
+                    J2534Gt.Record(j2534Device, j2534Profile, j2534Path,
+                        Console.Error.WriteLine, _ => samples++, timeout.Token).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (samples > 0) { }
+                if (samples == 0) throw new IOException("J2534 returned no complete samples.");
+                Console.WriteLine($"J2534: recorded {samples} SAE samples to {j2534Path}");
+                return 0;
+            }
             if (args is ["--catalog"] or ["--catalog", _])
             {
                 uint os = LiveScanner.DefaultOs;
@@ -52,6 +75,25 @@ static class Program
                     RamChannelCount = channels.Count(channel => channel.RamAddress.HasValue),
                     MaximumRecordingBytes = LiveScanner.MaximumLiveBytes, Channels = channels
                 }));
+                return 0;
+            }
+            if (args is ["--record-live", var recordPort, var recordLayout, var recordPath, var recordSeconds])
+            {
+                if (!int.TryParse(recordSeconds, out int seconds) || seconds is < 1 or > 300)
+                    throw new ArgumentException("Choose a recording duration between 1 and 300 seconds.");
+                var layout = ScannerLayout.Load(recordLayout);
+                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+                Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+                int samples = 0;
+                try
+                {
+                    LiveScanner.Record(recordPort, LiveScanner.Custom, layout.LiveChannels, recordPath,
+                        Console.Error.WriteLine, os => Console.Error.WriteLine($"PCM OS {os}"),
+                        _ => samples++, cancellation.Token).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (samples > 0) { }
+                if (samples == 0) throw new IOException("No complete live samples were recorded.");
+                Console.WriteLine($"Recorded {samples} complete samples to {recordPath}");
                 return 0;
             }
             if (args is ["--scanner-status"])
@@ -102,7 +144,7 @@ static class Program
                 if (!Enum.GetNames<VcmControlAction>().Any(name => name.Equals(control, StringComparison.OrdinalIgnoreCase)) ||
                     !Enum.TryParse<VcmControlAction>(control, ignoreCase: true, out var action) ||
                     !VcmTelemetryControls.AvailableLive(action))
-                    throw new ArgumentException("Choose Fan1On, Fan1Off, Fan2On, Fan2Off, ReleaseAllControls or ClearTroubleCodes.");
+                    throw new ArgumentException("Choose Fan1On, Fan1Off, Fan2On, Fan2Off, FuelPumpOn, FuelPumpOff, ReleaseFuelPumpControl, ReleaseAllControls or ClearTroubleCodes.");
                 using var cancellation = new CancellationTokenSource();
                 Console.CancelKeyPress += (_, eventArgs) =>
                 {

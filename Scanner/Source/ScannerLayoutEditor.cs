@@ -11,7 +11,7 @@ namespace WrongWay;
 
 sealed partial class ScannerWindow
 {
-    private static readonly string[] Colors = ["Mint", "Amber", "Blue", "Pink", "Lime", "Violet"];
+    private static readonly string[] Colors = TraceChart.ColorNames;
     private static readonly FilePickerFileType LayoutFile = new("WrongWay / VCM Scanner layout")
     {
         Patterns = ["*.json", "*.Layout.xml", "*.Graphs.xml", "*.Channels.xml", "*.MathParameter.xml", "*.xml"]
@@ -211,8 +211,8 @@ sealed partial class ScannerWindow
 
     private async Task EditTraces()
     {
-        var result = await EditList("Time chart traces", "Add up to six traces. Leave both range fields blank for automatic scaling.",
-            CurrentTraces(), 6, (owner, trace) =>
+        var result = await EditList("Time chart traces", $"Add up to {ScannerLayout.MaximumTraces} traces. Scroll to see all lanes; Ctrl+wheel zooms time. Leave both range fields blank for automatic scaling.",
+            CurrentTraces(), ScannerLayout.MaximumTraces, (owner, trace) =>
             {
                 var source = SourcePicker(trace?.Source);
                 var color = Choice(Colors, trace?.Color ?? 0);
@@ -326,7 +326,7 @@ sealed partial class ScannerWindow
             seed = [.. seed, new LiveChannelSetting(add.Id, add.Units[0], add.Name)];
         var catalogById = catalog.ToDictionary(item => item.Id);
         var result = await EditList("Live recording channels",
-            $"PCM OS {os} · Select PIDs and RAM channels. Each uses 1 or 2 bytes of the {LiveScanner.MaximumLiveBytes}-byte PCM limit.",
+            $"PCM OS {os} · Select PIDs and RAM channels. Above 18 bytes uses slower polled acquisition. Each uses 1 or 2 bytes of the {LiveScanner.MaximumLiveBytes}-byte scanner capacity.",
             seed, LiveScanner.MaximumLiveBytes, (owner, channel) =>
             {
                 var search = new TextBox { Watermark = "Find a name, PID or RAM address" };
@@ -364,7 +364,7 @@ sealed partial class ScannerWindow
                 items.Any(item => !catalogById.TryGetValue(item.Id, out var choice) || !choice.Units.Contains(item.Unit))
                     ? $"Edit or remove channels unavailable for OS {os}." :
                 items.Sum(item => catalogById[item.Id].Bytes) > LiveScanner.MaximumLiveBytes
-                    ? $"Remove channels to fit the {LiveScanner.MaximumLiveBytes}-byte PCM limit." : null);
+                    ? $"Remove channels to fit the {LiveScanner.MaximumLiveBytes}-byte scanner capacity." : null);
         if (result is not null)
             ApplyLayout(scannerLayout with { LiveChannels = result }, "Custom live recording profile saved.", selectProfile: true);
     }

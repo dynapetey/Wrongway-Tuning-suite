@@ -11,7 +11,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
-    <Version>0.4.12</Version>
+    <Version>0.4.17</Version>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
@@ -26,4 +26,14 @@
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <EmbeddedResource Include="Reference/LM7-F150/*" LogicalName="WrongWay.WiringGuide.%(Filename)%(Extension)" />
   </ItemGroup>
+  <Target Name="BuildLinuxGtDriver" BeforeTargets="PrepareForBuild"
+          Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(RuntimeIdentifier)' == 'linux-x64' And '$(DesignTimeBuild)' != 'true'">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/obj/native" />
+    <Exec Command="gcc -D_DEFAULT_SOURCE -std=c11 -O2 -fPIC -shared -pthread -o &quot;$(MSBuildProjectDirectory)/obj/native/libobdx_j2534.so&quot; &quot;$(MSBuildProjectDirectory)/../Native/obdx_j2534.c&quot;" />
+    <ItemGroup>
+      <Content Include="$(MSBuildProjectDirectory)/obj/native/libobdx_j2534.so"
+               Link="libobdx_j2534.so" CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    </ItemGroup>
+  </Target>
 </Project>

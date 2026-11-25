@@ -144,6 +144,66 @@ for cancel in [False, True]:
         assert p.returncode != 0 and ('canceled' if cancel else 'status 0x22') in err.lower(), (out, err)
 print('PASS rejected or stopped fan commands release the relays.')
 
+# Exact P59 pump frames are derived from the firmware handler, not the old draft.
+release_pump = frame(0x10, bytes.fromhex('6C 10 F0 AE 00 00 00 00 00 00 00'))
+accept_pump = frame(8, bytes.fromhex('6C F0 10 EE 01 E1'))
+accept_release_pump = frame(8, bytes.fromhex('6C F0 10 EE 00 E1'))
+for os_id in (12587603, 12587811):
+    for action, state in [('FuelPumpOn', '04'), ('FuelPumpOff', '00')]:
+        with session('--vcm-control-live', action, '--confirm') as (fd, p):
+            controls(fd, os_id=os_id, rpm=0)
+            expect(fd, frame(0x10, bytes.fromhex(f'6C 10 F0 AE 01 00 00 04 {state} 00 00')))
+            os.write(fd, frame(8, bytes.fromhex('6C F0 11 EE 01 E1')))
+            os.write(fd, accept_release_pump)  # Wrong CPID must not complete pump acceptance.
+            os.write(fd, accept_pump)
+            expect(fd, release_pump)
+            os.write(fd, accept_release_pump)
+            expect(fd, frame(0x25))
+            out, err = p.communicate(timeout=5)
+            assert p.returncode == 0 and json.loads(out)['ReleaseReply'] == '6CF010EE00E1', (out, err)
+print('PASS pump on/off for both P59 OS IDs, addressed acknowledgement and CPID-zero release.')
+
+for os_id, rpm, speed, expected in [(1252075, None, 0, 'unavailable'),
+                                  (12587811, 650, 0, 'switch the engine off'),
+                                  (12587811, 0, 1, 'Park the vehicle')]:
+    with session('--vcm-control-live', 'FuelPumpOn', '--confirm') as (fd, p):
+        controls(fd, os_id=os_id, rpm=rpm, speed=speed)
+        expect(fd, frame(0x25))  # No pump control request is permitted.
+        out, err = p.communicate(timeout=5)
+        assert p.returncode != 0 and expected in err, (out, err)
+print('PASS pump tests reject unverified OS, running engine and moving vehicle.')
+
+for failure in ('reject', 'cancel', 'no-command-reply', 'release-reject'):
+    with session('--vcm-control-live', 'FuelPumpOn', '--confirm') as (fd, p):
+        controls(fd, rpm=0)
+        expect(fd, frame(0x10, bytes.fromhex('6C 10 F0 AE 01 00 00 04 04 00 00')))
+        if failure == 'reject':
+            os.write(fd, frame(8, bytes.fromhex('6C F0 10 7F AE 22')))
+        elif failure != 'no-command-reply':
+            os.write(fd, accept_pump)
+            if failure == 'cancel':
+                time.sleep(.05)
+                os.kill(p.pid, signal.SIGINT)
+        expect(fd, release_pump)
+        os.write(fd, frame(8, bytes.fromhex('6C F0 10 7F AE 22')) if failure == 'release-reject' else accept_release_pump)
+        expect(fd, frame(0x25))
+        out, err = p.communicate(timeout=5)
+        assert p.returncode != 0, (failure, out, err)
+        if failure == 'release-reject':
+            assert 'did not confirm automatic control' in err, (out, err)
+        elif failure == 'cancel':
+            assert 'canceled' in err.lower(), (out, err)
+print('PASS pump Stop, refusal and timeout all attempt release; failed release is reported.')
+
+with session('--vcm-control-live', 'ReleaseFuelPumpControl', '--confirm') as (fd, p):
+    controls(fd)  # Release must not depend on an RPM/speed query.
+    expect(fd, release_pump)
+    os.write(fd, accept_release_pump)
+    expect(fd, frame(0x25))
+    out, err = p.communicate(timeout=5)
+    assert p.returncode == 0 and json.loads(out)['Reply'] == '6CF010EE00E1', (out, err)
+print('PASS standalone return-pump-to-PCM request.')
+
 with session('--vcm-control-live', 'ClearTroubleCodes', '--confirm') as (fd, p):
     controls(fd, rpm=0)
     expect(fd, frame(0x33, bytes.fromhex('00 F0 00')))

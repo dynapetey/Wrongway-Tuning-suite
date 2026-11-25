@@ -7,7 +7,7 @@ namespace WrongWayScanner
         private static VersionManager? _versionManager;
         private static UpdateChecker? _updateChecker;
 
-        public static void Initialize(string suiteVersion = "0.4.9")
+        public static void Initialize(string? suiteVersion = null)
         {
             _versionManager ??= new VersionManager(suiteVersion);
             _updateChecker ??= new UpdateChecker(_versionManager);

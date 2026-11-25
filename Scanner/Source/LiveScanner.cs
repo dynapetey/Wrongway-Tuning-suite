@@ -27,7 +27,8 @@ static class LiveScanner
 
     public const string Custom = "Custom";
     public const uint DefaultOs = 12587811;
-    public const int MaximumLiveBytes = DpidConfiguration.MaxGroups * ParameterGroup.MaxBytes;
+    public const int StreamingBytes = 18;
+    public const int MaximumLiveBytes = 36;
 
     public static LiveChannelChoice[] Catalog(uint os) =>
         Database().ListParametersBySupportedOs(os).OfType<PcmParameter>()
@@ -57,7 +58,7 @@ static class LiveScanner
                 throw new InvalidDataException($"The PCM catalog has no {choice.Unit} conversion for {choice.Label}.");
             bytes += parameter.ByteCount;
             if (bytes > MaximumLiveBytes)
-                throw new InvalidDataException($"This profile exceeds the PCM’s {MaximumLiveBytes}-byte limit. Remove recording channels.");
+                throw new InvalidDataException($"This profile exceeds the scanner’s {MaximumLiveBytes}-byte recording capacity. Remove recording channels.");
             profile.AddColumn(new LogColumn(parameter, conversion, false));
         }
         return profile;
@@ -103,7 +104,9 @@ static class LiveScanner
             throw new InvalidOperationException("Custom live profile accepted an unknown PID.");
         }
         catch (InvalidDataException) { }
-        Console.WriteLine($"Custom profile: {sample.Length} channels and unknown PID rejected");
+        PidDefinitionTests.SelfTest(db);
+        ExpandedLiveLogger.SelfTest(db);
+        Console.WriteLine($"Custom profile: {sample.Length} channels and unknown PID rejected; expanded polling checks passed");
         return total;
     }
 
@@ -132,7 +135,15 @@ static class LiveScanner
         if (File.Exists(path))
             throw new IOException("Choose a new CSV filename so the previous log is preserved.");
 
-        await WithVehicle(port, status, token, async (vehicle, logger) =>
+        using var diagnostics = new StreamWriter(new FileStream(path + ".diagnostics.log", FileMode.CreateNew, FileAccess.Write)) { AutoFlush = true };
+        void Report(string message)
+        {
+            diagnostics.WriteLine($"{DateTimeOffset.UtcNow:O} {message}");
+            status(message);
+        }
+        try
+        {
+        await WithVehicle(port, Report, token, async (vehicle, logger) =>
         {
             var os = await vehicle.QueryOperatingSystemId(token);
             if (os.Status != ResponseStatus.Success)
@@ -144,18 +155,28 @@ static class LiveScanner
                 : new LogProfileReader(database, os.Value, logger).Read(ProfilePath(profileName));
             if (profile.IsEmpty)
                 throw new InvalidDataException("The selected profile contains no channels for this PCM OS.");
-            status($"PCM OS {os.Value} · starting {profileName}");
+            Report($"PCM OS {os.Value} · starting {profileName}");
             using var can = new CanLogger(database, logger);
             await can.SetPort(null);
-            var scanner = vehicle.CreateLogger(os.Value, can, profile.Columns, logger);
+            var pcmBytes = profile.Columns.Sum(column => column.Parameter is PcmParameter pcm ? pcm.ByteCount : 0);
+            if (profileName == Custom && pcmBytes > StreamingBytes && os.Value is not (12587603 or 12587811))
+                throw new InvalidDataException($"Expanded polling has not been verified for PCM OS {os.Value}.");
+            bool polled = profileName == Custom && os.Value is 12587603 or 12587811 && (pcmBytes > StreamingBytes
+                || profile.Columns.Any(c => c.Parameter is PidParameter pid && pid.PID is >= 6 and <= 9));
+            var scanner = polled
+                ? new ExpandedLiveLogger(vehicle, can, os.Value, profile.Columns, logger, token)
+                : vehicle.CreateLogger(os.Value, can, profile.Columns, logger);
+            if (polled)
+                Report($"Recording {pcmBytes} bytes with bounded polling for fuel trims or expanded channels; sample rate depends on channel count.");
             token.ThrowIfCancellationRequested();
             try
             {
                 if (!await scanner.StartLogging())
-                    throw new IOException("The PCM did not start streaming live data.");
+                    throw new IOException("The PCM did not start live data: " + (logger.LastUserMessage ?? "no configuration acknowledgement"));
                 using var writer = new StreamWriter(new FileStream(path, FileMode.CreateNew, FileAccess.Write));
                 writer.AutoFlush = false;
                 long lastFlushMs = 0;
+                long? previousSampleMs = null;
                 var clock = Stopwatch.StartNew();
                 LiveColumn[]? columns = null;
                 int[]? order = null;
@@ -187,13 +208,16 @@ static class LiveScanner
                         }).ToArray();
                         writer.WriteLine("Time (s)," + string.Join(",", columns.Select(column =>
                             CsvLog.Escape(column.Unit.Length == 0 ? column.Name : $"{column.Name} [{column.Unit}]"))));
-                        status("Recording · " + Path.GetFileName(path));
+                        Report("Recording · " + Path.GetFileName(path));
                     }
                     if (row.Length != columns.Length ||
                         order!.Where((source, index) => row[source].ParameterId != columns[index].Id).Any())
                         throw new InvalidDataException("The adapter changed its channel order during recording.");
 
                     long milliseconds = clock.ElapsedMilliseconds;
+                    if (previousSampleMs is { } previous && milliseconds - previous > 500)
+                        Report($"Recording · sample gap {(milliseconds - previous) / 1000d:0.000}s; see log timestamps.");
+                    previousSampleMs = milliseconds;
                     var values = order!.Select(index => CsvLog.ParseReading(milliseconds, row[index].ValueAsString)).ToArray();
                     writer.WriteLine((milliseconds / 1000d).ToString("0.000", CultureInfo.InvariantCulture)
                         + "," + string.Join(",", values.Select(value => CsvLog.Escape(value.CsvValue))));
@@ -210,6 +234,12 @@ static class LiveScanner
                 await vehicle.ResetConnection();
             }
         });
+        }
+        catch (Exception error)
+        {
+            diagnostics.WriteLine($"{DateTimeOffset.UtcNow:O} {error}");
+            throw;
+        }
     }
 
     public static async Task<string[]> ReadCodes(string port, Action<string> status, CancellationToken token)
@@ -279,7 +309,8 @@ static class LiveScanner
 
     private sealed class ScannerLogger(Action<string> status) : ILogger
     {
-        public void AddUserMessage(string message) => status(message);
+        public string? LastUserMessage { get; private set; }
+        public void AddUserMessage(string message) { LastUserMessage = message; status(message); }
         public void AddDebugMessage(string message) { }
         public void StatusUpdateActivity(string message) { }
         public void StatusUpdateTimeRemaining(string message) { }

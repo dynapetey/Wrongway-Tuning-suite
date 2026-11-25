@@ -1,11 +1,11 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Parameters>
   <Parameter
-      id="FuelingMode"
+      id="FuelSystemStatus"
       pid="0003"
       name="Fueling Mode"
       description=""
-      storageType="uint8"
+      storageType="uint16"
       bitMapped="False">
     <Conversion units="Raw" expression="x" format="0.00" />
     <OS id="all" />
@@ -99,7 +99,7 @@
       storageType="uint8"
       bitMapped="False">
     <Conversion units="kph" expression="x" format="0.00" />
-    <Conversion units="mph" expression="(x*0.60934)" format="0.00" />
+    <Conversion units="mph" expression="(x*0.621371192237334)" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -168,9 +168,9 @@
       pid="0014"
       name="O2 Left Upstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -178,29 +178,29 @@
       pid="0015"
       name="O2 Left Downstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
-      id="SecondaryPosition"
+      id="O2LeftSensor3"
       pid="0016"
       name="Secondary Position"
       description=""
-      storageType="uint8"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Degrees" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
-      id="SecondaryVelocity"
+      id="O2LeftSensor4"
       pid="0017"
       name="Secondary Velocity"
       description=""
-      storageType="uint8"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Deg/Sec" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -208,9 +208,9 @@
       pid="0018"
       name="O2 Right Upstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -218,9 +218,9 @@
       pid="0019"
       name="O2 Right Downstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="((x - (x % 256)) / 256) * 5" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -776,8 +776,8 @@
   <Parameter
       id="ACWidebandAFRatio"
       pid="1144"
-      name="A/C Wideband A/F Ratio"
-      description=""
+      name="Wideband AFR (A/C Input Calculated)"
+      description="External wideband AFR calculated from A/C high-side pressure sensor input voltage; custom transfer curve requires sensor calibration."
       storageType="uint8"
       bitMapped="False">
     <Conversion units=":1" expression="((x/51.00) /.5) +9.58" format="0.00" />
@@ -896,27 +896,17 @@
     <Conversion units="Volts" expression="(x/51)" format="0.00" />
     <OS id="all" />
   </Parameter>
-  <Parameter
-      id="EngineOilPressure"
-      pid="115C"
-      name="Engine Oil Pressure"
-      description=""
-      storageType="uint8"
-      bitMapped="False">
+  <Parameter id="EngineOilPressure" pid="115C" name="Engine Oil Pressure" description="" storageType="uint8" bitMapped="False">
     <Conversion units="Volts" expression="(x/51)" format="0.00" />
-    <Conversion units="kpa" expression="(x * 4.326) - 110.313" format="0.00" />
+    <Conversion units="kPa" expression="(x * 4.32598) - 110.3125" format="0.00" />
     <OS id="all" />
-  </Parameter>
-  <Parameter
-      id="EngineOilPressureSensor"
-      pid="115C"
-      name="Engine Oil Pressure Sensor"
-      description=""
-      storageType="uint8"
-      bitMapped="False">
-    <Conversion units="Kpa" expression="((x*4.34)-104.2)" format="0.00" />
+  <Conversion units="PSI" expression="((x * 4.32598) - 110.3125) / 6.894757293168" format="0.00" /></Parameter>
+
+  <Parameter id="EngineOilPressureSensor" pid="115C" name="Engine Oil Pressure Sensor" description="Alias of EngineOilPressure PID 0x115C; same PCM byte and scaling." storageType="uint8" bitMapped="False">
+    <Conversion units="kPa" expression="(x * 4.32598) - 110.3125" format="0.00" />
     <OS id="all" />
-  </Parameter>
+  <Conversion units="PSI" expression="((x * 4.32598) - 110.3125) / 6.894757293168" format="0.00" /></Parameter>
+
   <Parameter
       id="CamSensor"
       pid="115E"

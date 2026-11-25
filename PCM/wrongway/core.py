@@ -372,7 +372,9 @@ def pcm_layout(data):
         if start % 2 or end % 2 != 1 or start >= end or end >= size or storage + 2 > size:
             raise ValueError(f'Corrupt segment range: {name}.')
         segments.append({'name': name, 'start': start, 'end': end, 'begin': begin, 'storage': storage})
-    if segments[0]['start'] != 0 or segments[0]['end'] != size - 1:
+    # Some P01/P59 OS ranges exclude the final 0x4AFC signature word.
+    # Honor either complete range from the header; do not extend or rewrite it.
+    if segments[0]['start'] != 0 or segments[0]['end'] not in (size - 3, size - 1):
         raise ValueError('Unsupported operating system checksum range.')
     # Calibration ranges must be ordered and disjoint, outside the boot/header area.
     for i, segment in enumerate(segments[1:], 1):

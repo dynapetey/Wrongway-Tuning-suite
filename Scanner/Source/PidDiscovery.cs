@@ -10,6 +10,22 @@ sealed record GtPidDiscovery(uint? OsId, uint[] SaePids, bool SaeComplete, uint[
 
 sealed partial class HammerdroidProbe
 {
+    private int pidTraceFrames;
+    private void TracePid(string message)
+    {
+        // Diagnostic-only: a logging failure must never interrupt vehicle communication.
+        try
+        {
+            string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".local", "state", "wrongway-scanner");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "sae-discovery.log"),
+                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     public static Task<GtPidDiscovery> DiscoverPids(string device, Action<string> status, CancellationToken token) =>
         WithAdapter(device, status, token, (client, _) => client.ReadAvailablePids(status));
 
@@ -96,6 +112,7 @@ sealed partial class HammerdroidProbe
     private async Task<byte[]?> ReadPidReply(byte[] request, Func<byte[], bool> matches, int milliseconds)
     {
         token.ThrowIfCancellationRequested();
+        TracePid($"TX {Convert.ToHexString(request)}");
         await serial.Send(Encode(0x10, request));
         long until = Environment.TickCount64 + milliseconds;
         try
@@ -103,6 +120,8 @@ sealed partial class HammerdroidProbe
             while (true)
             {
                 var (command, frame) = await Packet(until);
+                if (pidTraceFrames++ < 256)
+                    TracePid($"RX command={command:X2} payload={Convert.ToHexString(frame)}");
                 if (command is not (0x08 or 0x09) || frame.Length < 5 ||
                     frame[2] != 0x10 || !(frame[1] == 0xF0 || request[3] == 0x01 && frame[1] == 0x6B))
                     continue;
@@ -118,6 +137,7 @@ sealed partial class HammerdroidProbe
         }
         catch (TimeoutException)
         {
+            TracePid($"TIMEOUT request={Convert.ToHexString(request)}");
             token.ThrowIfCancellationRequested();
             return null;
         }

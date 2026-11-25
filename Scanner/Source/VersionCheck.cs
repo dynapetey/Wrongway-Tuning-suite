@@ -67,9 +67,9 @@ namespace WrongWayScanner
         private readonly string _cacheFilePath;
         private readonly HttpClient _httpClient;
 
-        public VersionManager(string suiteVersion = "0.4.9")
+        public VersionManager(string? suiteVersion = null)
         {
-            _suiteVersion = suiteVersion;
+            _suiteVersion = suiteVersion ?? typeof(VersionManager).Assembly.GetName().Version?.ToString(3) ?? "unknown";
             _cacheFilePath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "WrongWay",
@@ -119,16 +119,16 @@ namespace WrongWayScanner
                 return new ComponentVersion
                 {
                     Name = "Scanner",
-                    CurrentVersion = "0.4.9",
-                    LatestVersion = ExtractVersion(latest["tag_name"]?.ToString() ?? "v0.4.9"),
-                    UpdateAvailable = IsNewerVersion("0.4.9", ExtractVersion(latest["tag_name"]?.ToString() ?? "v0.4.9")),
-                    ReleaseDate = latest["published_at"]?.ToString() ?? DateTime.UtcNow.ToString("O"),
-                    ReleaseNotes = latest["body"]?.ToString() ?? "No release notes",
-                    DownloadUrl = latest["html_url"]?.ToString() ?? ""
+                    CurrentVersion = _suiteVersion,
+                    LatestVersion = ExtractVersion(ReleaseValue(latest, "tag_name") ?? _suiteVersion),
+                    UpdateAvailable = IsNewerVersion(_suiteVersion, ExtractVersion(ReleaseValue(latest, "tag_name") ?? _suiteVersion)),
+                    ReleaseDate = ReleaseValue(latest, "published_at") ?? DateTime.UtcNow.ToString("O"),
+                    ReleaseNotes = ReleaseValue(latest, "body") ?? "No release notes",
+                    DownloadUrl = ReleaseValue(latest, "html_url") ?? ""
                 };
             }
 
-            return new ComponentVersion { Name = "Scanner", CurrentVersion = "0.4.9" };
+            return new ComponentVersion { Name = "Scanner", CurrentVersion = _suiteVersion };
         }
 
         private async Task<ComponentVersion> GetPcmVersionAsync()
@@ -141,11 +141,11 @@ namespace WrongWayScanner
                 {
                     Name = "PCM Hammer",
                     CurrentVersion = "2.0.0",
-                    LatestVersion = ExtractVersion(latest["tag_name"]?.ToString() ?? "v2.0.0"),
-                    UpdateAvailable = IsNewerVersion("2.0.0", ExtractVersion(latest["tag_name"]?.ToString() ?? "v2.0.0")),
-                    ReleaseDate = latest["published_at"]?.ToString() ?? DateTime.UtcNow.ToString("O"),
-                    ReleaseNotes = latest["body"]?.ToString() ?? "No release notes",
-                    DownloadUrl = latest["html_url"]?.ToString() ?? ""
+                    LatestVersion = ExtractVersion(ReleaseValue(latest, "tag_name") ?? "v2.0.0"),
+                    UpdateAvailable = IsNewerVersion("2.0.0", ExtractVersion(ReleaseValue(latest, "tag_name") ?? "v2.0.0")),
+                    ReleaseDate = ReleaseValue(latest, "published_at") ?? DateTime.UtcNow.ToString("O"),
+                    ReleaseNotes = ReleaseValue(latest, "body") ?? "No release notes",
+                    DownloadUrl = ReleaseValue(latest, "html_url") ?? ""
                 };
             }
 
@@ -162,11 +162,11 @@ namespace WrongWayScanner
                 {
                     Name = "Live USB Creator",
                     CurrentVersion = "0.4.8",
-                    LatestVersion = ExtractVersion(latest["tag_name"]?.ToString() ?? "v0.4.8"),
-                    UpdateAvailable = IsNewerVersion("0.4.8", ExtractVersion(latest["tag_name"]?.ToString() ?? "v0.4.8")),
-                    ReleaseDate = latest["published_at"]?.ToString() ?? DateTime.UtcNow.ToString("O"),
-                    ReleaseNotes = latest["body"]?.ToString() ?? "No release notes",
-                    DownloadUrl = latest["html_url"]?.ToString() ?? ""
+                    LatestVersion = ExtractVersion(ReleaseValue(latest, "tag_name") ?? "v0.4.8"),
+                    UpdateAvailable = IsNewerVersion("0.4.8", ExtractVersion(ReleaseValue(latest, "tag_name") ?? "v0.4.8")),
+                    ReleaseDate = ReleaseValue(latest, "published_at") ?? DateTime.UtcNow.ToString("O"),
+                    ReleaseNotes = ReleaseValue(latest, "body") ?? "No release notes",
+                    DownloadUrl = ReleaseValue(latest, "html_url") ?? ""
                 };
             }
 
@@ -204,7 +204,7 @@ namespace WrongWayScanner
                     var tagName = element.GetProperty("tag_name").GetString() ?? "";
                     if (tagName.Contains(releaseTag, StringComparison.OrdinalIgnoreCase))
                     {
-                        releases.Add(element);
+                        releases.Add(element.Clone());
                     }
                 }
 
@@ -215,6 +215,10 @@ namespace WrongWayScanner
                 return Array.Empty<JsonElement>();
             }
         }
+
+        private static string? ReleaseValue(JsonElement release, string name) =>
+            release.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String
+                ? property.GetString() : null;
 
         private static string ExtractVersion(string versionString)
         {
@@ -252,7 +256,7 @@ namespace WrongWayScanner
             {
                 var cache = LoadVersionCache();
                 var elapsed = DateTime.UtcNow - cache.LastChecked;
-                return elapsed.TotalMinutes < CacheDurationMinutes;
+                return cache.SuiteVersion == _suiteVersion && elapsed.TotalMinutes >= 0 && elapsed.TotalMinutes < CacheDurationMinutes;
             }
             catch
             {

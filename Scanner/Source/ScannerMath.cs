@@ -602,7 +602,7 @@ sealed class MathFormula
         Expression.Condition(value, Expression.Constant(1d), Expression.Constant(0d));
 }
 
-sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec)[] inputs, Func<double[], double> evaluate)
+sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec)[] inputs, Func<double[], double> evaluate, Func<long, bool>? valid = null)
 {
     private const int MaximumAge = 500;
     private readonly double[] values = new double[inputs.Length];
@@ -664,7 +664,20 @@ sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec
             int? aliasPid = VcmConfigImporter.TryGetVcmMathId(setting.Name);
             var output = new Channel(key++, aliasPid, setting.Name, setting.Unit) { IsMath = true, MathId = setting.Id };
             var resolvedInputs = sources.Select(s => (s.Channel!, s.Spec)).ToArray();
-            var result = new MathChannel(output, resolvedInputs, formula.Evaluate);
+            Func<long, bool>? valid = null;
+            // Keep raw voltage untouched; a powered-down input is not a rich AFR.
+            if (setting.Unit.Equals("AFR", StringComparison.OrdinalIgnoreCase)
+                && formula.InputSpecs.Any(s => s.BaseToken == "7101.10"))
+            {
+                var voltage = Resolve(log.Channels, "7101.10");
+                var rpm = log.Channels.FirstOrDefault(c => c.Pid == 0x000C);
+                var ignition = log.Channels.FirstOrDefault(c => c.Pid == 0x1141);
+                valid = time => voltage?.AsOf(time) is { Number: > 0 and < 5 } v
+                    && time - v.Time <= MaximumAge
+                    && rpm?.AsOf(time)?.Number is not <= 0
+                    && ignition?.AsOf(time)?.Number is not <= 0;
+            }
+            var result = new MathChannel(output, resolvedInputs, formula.Evaluate, valid);
             result.Replay();
             results.Add(result);
             available.Add(output);
@@ -804,6 +817,19 @@ sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec
             throw new InvalidDataException("A lookahead calculation used an incomplete future window.");
         if (MathSetting.Validate([new("A", "", "[B] + 1"), new("B", "", "[A] + 1")]))
             throw new InvalidDataException("Maths validation accepted a cyclic dependency.");
+        var shutdown = new ScanLog("wideband shutdown");
+        var wb = new Channel(0, 7101, "A/C Pressure Sensor Input", "V");
+        var running = new Channel(1, 12, "Engine Speed", "RPM");
+        shutdown.Channels.AddRange([wb, running]);
+        wb.Readings.AddRange([new(0, 2.5), new(100, 0), new(200, 2.5), new(300, 5)]);
+        running.Readings.AddRange([new(0, 900), new(100, 800), new(200, 0), new(300, 900)]);
+        var guarded = Build(shutdown, [MathSetting.Defaults[0]])[0];
+        if (guarded.Output.AsOf(0)?.Number != 14.57 || guarded.Output.AsOf(100)?.Number is not null
+            || guarded.Output.AsOf(200)?.Number is not null || guarded.Output.AsOf(300)?.Number is not null)
+            throw new InvalidDataException("Wideband accepted a zero/railed input or stopped engine.");
+        wb.Readings.Add(new(400, 2.5)); running.Readings.Add(new(400, 900)); guarded.Append(400);
+        if (guarded.Output.AsOf(400)?.Number != 14.57)
+            throw new InvalidDataException("Wideband did not recover after valid input returned.");
         Build(log, [settings[1] with { Name = "Renamed", Formula = "[7101.10] + 1" }]);
         if (log.Channels.Count != 7 || log.Channels[^1].Name != "Renamed" || afrSource.Resolve(log) != log.Channels[^1])
             throw new InvalidDataException("Editing Maths left an outdated channel in the log.");
@@ -835,8 +861,8 @@ sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec
     private void Add(long time)
     {
         double? result = null;
-        bool complete = true;
-        for (int i = 0; i < inputs.Length; i++)
+        bool complete = valid?.Invoke(time) ?? true;
+        for (int i = 0; i < inputs.Length && complete; i++)
         {
             var (ch, spec) = inputs[i];
             if (spec.Evaluate(ch, time, MaximumAge) is not double value)

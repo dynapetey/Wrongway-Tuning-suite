@@ -32,7 +32,8 @@ sealed partial class ScannerWindow
 
         var logBox = new SelectableTextBlock
         {
-            Text = "Fan tests run for two seconds with the engine off and ignition on. Keep clear of the fans. " +
+            Text = "Fan and fuel-pump relay tests run for two seconds with the engine off and ignition on. " +
+                "Keep clear of the fans and check the fuel system for leaks. " +
                 "The log shows the PCM reply for each live command.",
             Foreground = DeskUi.Ink,
             FontFamily = new FontFamily("DejaVu Sans Mono"),
@@ -101,7 +102,7 @@ sealed partial class ScannerWindow
                         IdentifyOs(result.OsId);
                         AppendLog($"PCM OS {result.OsId} accepted {label} · {result.Reply}");
                         if (result.ReleaseReply is { } release)
-                            AppendLog($"Automatic fan control restored · {release}");
+                            AppendLog($"Automatic PCM control restored · {release}");
                     }
                     else
                         AppendLog(status.Text ?? "Adapter operation did not complete.");
@@ -157,10 +158,13 @@ sealed partial class ScannerWindow
                     LiveButton("Fan 2 on", VcmControlAction.Fan2On),
                     LiveButton("Fan 2 off", VcmControlAction.Fan2Off),
                     LiveButton("Return fans to PCM", VcmControlAction.ReleaseAllControls)),
-                DeskUi.Section("FUEL SYSTEM FRAME PREVIEWS"),
+                DeskUi.Section("FUEL PUMP RELAY TESTS"),
                 Row(
-                    Button("Pump on", () => PreviewControl(new(VcmControlAction.FuelPumpOn))),
-                    Button("Pump off", () => PreviewControl(new(VcmControlAction.FuelPumpOff))),
+                    LiveButton("Pump on (2s)", VcmControlAction.FuelPumpOn),
+                    LiveButton("Pump off (2s)", VcmControlAction.FuelPumpOff),
+                    LiveButton("Return pump to PCM", VcmControlAction.ReleaseFuelPumpControl)),
+                DeskUi.Section("FUEL LOOP FRAME PREVIEWS"),
+                Row(
                     Button("Open loop", () => PreviewControl(new(VcmControlAction.ForceOpenLoop))),
                     Button("Closed loop", () => PreviewControl(new(VcmControlAction.ForceClosedLoop))))
             }

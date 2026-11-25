@@ -97,6 +97,9 @@ sealed record LiveChannelSetting(string Id, string Unit, string Label)
 sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, GraphSetting Graph,
     ChannelDisplay[] Channels, LiveChannelSetting[]? LiveChannels, MathSetting[]? Maths = null, GraphSetting[]? Graphs = null)
 {
+    public const int MaximumTraces = 32;
+    public const int ColorCount = 32;
+
     public static ScannerLayout Default => new(
         [new(ChannelSource.Rpm, "Engine speed", GaugeKind.Dial, 0, 8000, 0),
          new(ChannelSource.Map, "Manifold pressure", GaugeKind.Dial, 0, 120, 1),
@@ -160,6 +163,16 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
         {
             layout.Save(path);
             var loaded = Load(path);
+            var expanded = Enumerable.Range(0, MaximumTraces)
+                .Select(i => new TraceSetting(new ChannelSource("Trace " + i), i)).ToArray();
+            var expandedLayout = layout with { Traces = expanded };
+            expandedLayout.Save(path);
+            var expandedReloaded = Load(path);
+            if (!expandedReloaded.Traces!.SequenceEqual(expanded)
+                || (expandedLayout with { Traces = expanded.Append(new TraceSetting(new ChannelSource("Overflow"), 0)).ToArray() }).IsValid()
+                || (expandedLayout with { Traces = [expanded[0], expanded[0]] }).IsValid()
+                || (expandedLayout with { Traces = [expanded[0] with { Color = ColorCount }] }).IsValid())
+                throw new InvalidDataException("32-trace round-trip, limit, duplicate or color validation failed.");
             value.Display = loaded.Channels.Single();
             x.Readings.Add(new Reading(0, -1));
             y.Readings.Add(new Reading(0, 12));
@@ -179,7 +192,7 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
     public bool IsValid() =>
         Gauges is { Length: <= 12 } && Gauges.All(g => g is not null && Source(g.Source) && Text(g.Label)
             && Enum.IsDefined(g.Kind) && Range(g.Minimum, g.Maximum) && Color(g.Color))
-        && (Traces is null || Traces.Length <= 6 && Traces.All(t => t is not null && Source(t.Source) && Color(t.Color)
+        && (Traces is null || Traces.Length <= MaximumTraces && Traces.All(t => t is not null && Source(t.Source) && Color(t.Color)
             && (t.Minimum is null && t.Maximum is null || t.Minimum is double low && t.Maximum is double high && Range(low, high)))
             && Traces.Select(t => t.Source).Distinct().Count() == Traces.Length)
         && ValidGraph(Graph)
@@ -213,6 +226,6 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
     private static bool Source(ChannelSource? source) => source is not null && Text(source.Name)
         && source.Unit is { Length: <= 80 } && source.Occurrence is >= 0 and <= 1024;
     private static bool Text(string? value) => value is { Length: > 0 and <= 250 };
-    private static bool Color(int index) => index is >= 0 and < 6;
+    private static bool Color(int index) => index is >= 0 and < ColorCount;
     private static bool Range(double low, double high) => double.IsFinite(low) && double.IsFinite(high - low) && high > low;
 }

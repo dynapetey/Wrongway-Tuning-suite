@@ -294,6 +294,20 @@ sealed partial class TuneWindow : Window
         UpdateGroups();
         RefreshFiles();
         Report(message, warning);
+        string dataRoot = Environment.GetEnvironmentVariable("XDG_DATA_HOME")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+        string installedXdf = Path.Combine(dataRoot, "wrongway-suite", "definitions", candidate.Os.ToString(), "definition.xdf");
+        if (File.Exists(installedXdf))
+        {
+            try { SetDefinition(installedXdf); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or System.Xml.XmlException)
+            {
+                definition = null;
+                UpdateGroups();
+                RefreshFiles();
+                Report("BIN validated, but the installed XDF could not load. " + ex.Message, true);
+            }
+        }
     }
 
     private async Task OpenXdf()

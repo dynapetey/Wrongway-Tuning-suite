@@ -1,8 +1,17 @@
-# WrongWay Suite 0.4.9 for Linux x86-64
+# WrongWay Suite 0.4.17 for Linux x86-64
 
-The suite combines the WrongWayScanner 0.4.9 scanner and decoded P59 BIN
+The suite combines the WrongWayScanner 0.4.17 scanner and decoded P59 BIN
 editor with a PCM window backed by PCM Hammer 2.0.0. All three use the
 dark theme.
+
+The suite scanner includes corrected PID decoding, O2 readings in millivolts,
+both-bank fuel-trim logging, multiple simultaneous histogram tables, and a
+Linux J2534 adapter option for SAE discovery and recording. Serial DVI remains
+the default for GM enhanced data and the A/C-input wideband AFR channel.
+Linux x64 scanner builds compile and package the native driver automatically
+with `gcc`. See [scanner details](Scanner/README.md) and
+[native transport checks](Scanner/Native/README.md). Real PCM streaming with
+the updated scanner remains to be verified.
 
 ## Install and start
 

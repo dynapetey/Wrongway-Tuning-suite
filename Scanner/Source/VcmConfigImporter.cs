@@ -402,7 +402,7 @@ static class VcmConfigImporter
         int traceColor = 0;
         foreach (var series in root.Descendants().Where(e => e.Name.LocalName.Equals("Series", StringComparison.OrdinalIgnoreCase)))
         {
-            if (traces.Count >= 6)
+            if (traces.Count >= ScannerLayout.MaximumTraces)
                 break;
             int pid = ParseInt(series.Element("ParameterID"), 50070);
             int? unit = ParseNullableInt(series.Element("Unit"));
@@ -417,7 +417,7 @@ static class VcmConfigImporter
                 min = 0;
             if (min.HasValue && max.HasValue && max.Value <= min.Value)
                 (min, max) = (null, null);
-            traces.Add(new TraceSetting(source, traceColor++ % 6, min, max));
+            traces.Add(new TraceSetting(source, traceColor++ % ScannerLayout.ColorCount, min, max));
         }
 
         var graphs = ParseGraphTables(root, log);

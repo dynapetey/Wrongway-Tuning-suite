@@ -196,6 +196,32 @@ class FileAndChecksumTests(unittest.TestCase):
         self.assertTrue(all(s['valid'] for s in core.checksum_report(image.data)[2]))
         self.assertEqual(core.pcm_layout(image.data)[0], 'P01')
 
+    def test_os_checksum_range_excludes_terminal_signature(self):
+        for size in (524288, 1048576):
+            with self.subTest(size=size):
+                image = fixture(size)
+                struct.pack_into('>I', image.data, 0x510, size - 3)
+                core.repair_checksums(image)
+                report = core.checksum_report(image.data)[2]
+                self.assertTrue(all(s['valid'] for s in report))
+                self.assertEqual(report[0]['end'], size - 3)
+                self.assertEqual(image.data[-2:], b'\x4a\xfc')
+                # A calibration edit must still fail validation until repaired.
+                image.data[0x800a] ^= 1
+                self.assertFalse(core.checksum_report(image.data)[2][1]['valid'])
+                core.repair_checksums(image)
+                self.assertTrue(all(s['valid'] for s in core.checksum_report(image.data)[2]))
+                image.data[0x20010] ^= 1
+                self.assertFalse(core.checksum_report(image.data)[2][0]['valid'])
+
+    def test_shortened_os_range_remains_rejected(self):
+        image = fixture()
+        for end in (len(image.data) - 5, 0x3fff):
+            with self.subTest(end=end):
+                struct.pack_into('>I', image.data, 0x510, end)
+                with self.assertRaises(ValueError):
+                    core.checksum_report(image.data)
+
     def test_os_checksum_excludes_parameter_and_calibration_area(self):
         image = fixture()
         os_segment = core.pcm_layout(image.data)[2][0]

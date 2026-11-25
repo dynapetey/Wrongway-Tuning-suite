@@ -21,9 +21,12 @@ sealed partial class HammerdroidProbe
             cancellation.ThrowIfCancellationRequested();
 
             bool clearCodes = action == VcmControlAction.ClearTroubleCodes;
-            bool releaseOnly = action == VcmControlAction.ReleaseAllControls;
+            bool releaseOnly = action is VcmControlAction.ReleaseAllControls or VcmControlAction.ReleaseFuelPumpControl;
+            bool pump = action is VcmControlAction.FuelPumpOn or VcmControlAction.FuelPumpOff;
+            string relay = pump ? "fuel-pump relay" : "fan relays";
+            var releaseAction = pump ? VcmControlAction.ReleaseFuelPumpControl : VcmControlAction.ReleaseAllControls;
             if (!clearCodes && os is not (12587603 or 12587811))
-                throw new IOException($"Fan relay control frames are unavailable for PCM OS {os}.");
+                throw new IOException($"Relay control frames are unavailable for PCM OS {os}.");
             if (!releaseOnly)
             {
                 await client.RequireEngineStopped();
@@ -41,17 +44,17 @@ sealed partial class HammerdroidProbe
             {
                 reply = await client.ExchangeControl(action);
                 accepted = true;
-                status("PCM accepted the fan command. Returning to automatic control in two seconds…");
+                status($"PCM accepted the {relay} command. Returning to automatic control in two seconds…");
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellation);
             }
             finally
             {
-                status("Returning fan relays to automatic PCM control…");
-                try { releaseReply = await client.ExchangeControl(VcmControlAction.ReleaseAllControls); }
+                status($"Returning {relay} to automatic PCM control…");
+                try { releaseReply = await client.ExchangeControl(releaseAction); }
                 catch (Exception ex) when (ex is IOException or TimeoutException)
                 {
-                    throw new IOException((accepted ? "Fan command accepted. " : "Fan command outcome uncertain. ") +
-                        "The PCM did not confirm automatic control. Use Return fans to PCM or cycle the ignition. " + ex.Message, ex);
+                    throw new IOException((accepted ? "Relay command accepted. " : "Relay command outcome uncertain. ") +
+                        "The PCM did not confirm automatic control. Use the return-to-PCM button or cycle the ignition. " + ex.Message, ex);
                 }
             }
             return new VcmControlResult(os, reply, releaseReply);

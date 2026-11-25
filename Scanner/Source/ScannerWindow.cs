@@ -27,6 +27,8 @@ sealed partial class ScannerWindow : Window
     private readonly CheckBox recordedOnly = new() { Content = "Recorded only", MinHeight = 22 };
     private readonly CheckBox ecmOnly = new() { Content = "ECM-supported", MinHeight = 22, IsEnabled = false };
     private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
+    private readonly ComboBox adapterMode = new() { ItemsSource = new[] { "Serial (OBDX DVI)", "J2534 (Linux VPW)" }, SelectedIndex = 0, Width = 168 };
+    private bool UsesJ2534 => adapterMode.SelectedIndex == 1;
     private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
     private readonly Slider slider = new() { Minimum = 0, Maximum = 1, IsEnabled = false };
@@ -152,7 +154,7 @@ sealed partial class ScannerWindow : Window
         };
         var toolbar = Row(openButton, exportButton, recordButton, stopButton, codesButton,
             histogramButton, mathsButton, widebandButton, telemetryHubButton, tuneButton);
-        var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), port, refreshPorts, gtButton, discoverPidsButton,
+        var hardwareRow = Row(DeskUi.Section("OBDX PRO GT"), adapterMode, port, refreshPorts, gtButton, discoverPidsButton,
             DeskUi.Label("Profile", 12, Muted), profile, editLive);
 
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto") };
@@ -189,7 +191,11 @@ sealed partial class ScannerWindow : Window
         Put(playbackRow, clock, 0, 2);
         var plot = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
         Put(plot, DeskUi.Strip(chartHeader, DeskUi.Header), 0);
-        Put(plot, chart, 1);
+        var chartScroll = new ScrollViewer { Content = chart,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        ToolTip.SetTip(chart, "Scroll for more channel lanes. Ctrl+wheel zooms time.");
+        Put(plot, chartScroll, 1);
         Put(plot, DeskUi.Strip(playbackRow), 2);
 
         var main = new Grid
@@ -247,6 +253,12 @@ sealed partial class ScannerWindow : Window
         recordedOnly.IsCheckedChanged += (_, _) => PopulateChannels();
         ecmOnly.IsCheckedChanged += (_, _) => PopulateChannels();
         port.TextChanged += (_, _) => ClearPidDiscovery();
+        adapterMode.SelectionChanged += (_, _) =>
+        {
+            ClearPidDiscovery();
+            SetStatus(UsesJ2534 ? "Linux J2534 selected. SAE PID discovery and SAE-only recording available (GM enhanced not supported)."
+                : "OBDX DVI serial selected. Existing scanner recording available.");
+        };
         if (OperatingSystem.IsLinux())
         {
             string[] gtPorts = LiveScanner.Ports().Where(path =>
@@ -478,9 +490,9 @@ sealed partial class ScannerWindow : Window
                 var traces = CurrentTraces().Where(trace => trace.Source.Resolve(current) != channel).ToList();
                 if (name.IsChecked == true)
                 {
-                    if (traces.Count >= 6)
+                    if (traces.Count >= ScannerLayout.MaximumTraces)
                     {
-                        SetStatus("Select up to six channels for the chart.");
+                        SetStatus($"Select up to {ScannerLayout.MaximumTraces} channels for the chart.");
                         Dispatcher.UIThread.Post(PopulateChannels);
                         return;
                     }
@@ -570,7 +582,8 @@ sealed partial class ScannerWindow : Window
         GtPidDiscovery? result = null;
         bool success = await RunHardware(async token =>
         {
-            result = await HammerdroidProbe.DiscoverPids(device, PostStatus, token);
+            result = UsesJ2534 ? await J2534Gt.Discover(device, PostStatus, token)
+                : await HammerdroidProbe.DiscoverPids(device, PostStatus, token);
         }, recording: false, completion: "ECM PID scan complete.");
         if (!success || result is null || closeAfterHardware)
             return;
@@ -704,6 +717,7 @@ sealed partial class ScannerWindow : Window
 
     private void RefreshChart()
     {
+        chart.MinHeight = TraceChart.MinimumPlotHeight(active.Count);
         chart.Channels = active;
         chart.TraceStyles = traceStyles;
         chart.CursorTime = cursor;
@@ -840,13 +854,21 @@ sealed partial class ScannerWindow : Window
         Interlocked.Exchange(ref skippedDisplayFrames, 0);
         await RunHardware(async token =>
         {
-            await LiveScanner.Record(device, selection, custom, path, PostStatus,
-                os =>
-                {
-                    recordedOs = os;
-                    Dispatcher.UIThread.Post(() => IdentifyOs(os));
-                },
-                reading => QueueLive(next, reading), token);
+            if (UsesJ2534)
+            {
+                if (selection == LiveScanner.Custom)
+                    throw new NotSupportedException("J2534 custom GM-enhanced profiles are not available; use FuelTrims or Basics for SAE logging.");
+                await J2534Gt.Record(device, selection, path, PostStatus,
+                    reading => QueueLive(next, reading), token);
+            }
+            else
+                await LiveScanner.Record(device, selection, custom, path, PostStatus,
+                    os =>
+                    {
+                        recordedOs = os;
+                        Dispatcher.UIThread.Post(() => IdentifyOs(os));
+                    },
+                    reading => QueueLive(next, reading), token);
         }, recording: true);
         if (next.Frames > 0)
         {
@@ -1077,12 +1099,12 @@ sealed partial class ScannerWindow : Window
                 return;
             }
             current.Channels.Add(calculated);
-            if (active.Count < 6)
+            if (active.Count < ScannerLayout.MaximumTraces)
             {
                 if (scannerLayout.Traces is null)
                     active.Add(calculated);
                 else if (!active.Contains(calculated) && !scannerLayout.Traces.Any(trace => trace.Source.Resolve(current) == calculated)
-                    && scannerLayout.Traces.Length < 6)
+                    && scannerLayout.Traces.Length < ScannerLayout.MaximumTraces)
                 {
                     var traces = scannerLayout.Traces.Append(new TraceSetting(ChannelSource.From(current, calculated),
                         NextTraceColor(scannerLayout.Traces))).ToArray();

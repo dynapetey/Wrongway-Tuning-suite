@@ -82,11 +82,11 @@
   "test.sh": "f376a1bf17fda58e0fb9426ae148d4318b6dc2f5de66722537667ce07eb99040",
   "tests/gui_smoke.py": "27f813cb336efce0f2ab7a39b44df9140175ec6b170ec39d2433daed8d9b4b8e",
   "tests/test_backend.py": "343f57d7f05c68f72e7677394cb5a8b50e8d80e34178556f53e309043fcd027c",
-  "tests/test_core.py": "ac3c1cd5e096053e6f604a53d37b4afa245999b10a099309e7d7167e18d73e5b",
+  "tests/test_core.py": "74ce7c8177d4d84fa2168e41f12f9b19d8573bafb540e6b9e96bc58e6f811528",
   "validation.txt": "c9c4c666d48e662c2382502126cb9c5e31fcf069068304f888867a5e97c403d5",
   "wrongway/__init__.py": "1551cf04691f85b4038bfcf7bf43e2289ad75ea5cec74bc65bfd556aa3498bb5",
   "wrongway/app.py": "cb7518721bf85654378a82d51e31a49792e564566dae23e4b40b3e44070d7d27",
   "wrongway/backend.py": "f8f6e874bc5adf1591b36c85bd2b14be50f425bcabaab74247f81a853c484960",
-  "wrongway/core.py": "bf4acfe535b55a4ea27c4b27943a648fb30228f21d79bf0b98cee0d405fd9505",
+  "wrongway/core.py": "f1e23c182770b2615ba686ca19fe102e7f8f7c087780b5c03d9be7f5d39418ae",
   "wrongway/logs.py": "44a5827bb1ce46d1434db53016882fbe5186acc3c4279c71e5fbc39f5704024f"
 }
