@@ -1,6 +1,6 @@
-# WrongWay Suite 0.4.17 for Linux x86-64
+# WrongWay Suite 0.4.18 for Linux x86-64
 
-The suite combines the WrongWayScanner 0.4.17 scanner and decoded P59 BIN
+The suite combines the WrongWayScanner 0.4.18 scanner and decoded P59 BIN
 editor with a PCM window backed by PCM Hammer 2.0.0. All three use the
 dark theme.
 

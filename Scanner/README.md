@@ -1,4 +1,4 @@
-# WrongWay Scanner + Hammerdroid 0.4.17
+# WrongWay Scanner + Hammerdroid 0.4.18
 
 Standalone x86-64 Linux desktop scanner and P59 calibration editor. Extract this archive and run the
 `WrongWayScanner` executable with the `Assets` folder beside it. The .NET
@@ -34,7 +34,7 @@ on Wayland sessions.
 - **Edit traces** sets the time chart order, colors and per-trace scale.
   **Channels → Edit** controls labels, units, linear conversions, precision
   and visibility. These settings change the displayed values. CSV exports
-  retain the recorded channel names, units and values.
+  use the displayed imperial channel names, units and values.
 - Changes are saved automatically to `~/.config/wrongway-suite/scanner-layout.json`
   (or under `$XDG_CONFIG_HOME`). **Layout** can export, load or reset the
   settings. Drag the panel dividers to resize the workspace.
@@ -403,3 +403,13 @@ outputs include `libobdx_j2534.so` beside the scanner automatically. See
 `--self-test` includes 36 raw-byte decoder cases for O2 millivolts, fuel trims,
 oil pressure, RPM, coolant, vehicle speed and fuel-system status. Emulator
 results validate synthetic responses; real PCM streaming is still unverified.
+
+## Imperial measurements
+
+The scanner displays US customary measurements throughout channel readouts,
+gauges, charts, histogram axes and cells, telemetry readouts and CSV exports:
+°F, mph, psi, lb/min, lb-ft and applicable US length, volume and mass units.
+O2 voltage remains mV; electrical values, RPM, percent and AFR keep their units.
+Existing metric logs are converted for display; their samples and formula
+inputs remain unchanged. Existing metric gauge ranges and histogram
+breakpoints are converted with the same scales and temperature offsets.

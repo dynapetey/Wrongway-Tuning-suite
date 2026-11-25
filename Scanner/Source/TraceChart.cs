@@ -127,8 +127,8 @@ sealed class TraceChart : Control
             context.DrawText(Text("No samples in view", 11, Dim), new Point(area.X + 8, area.Y + 6));
             return;
         }
-        double min = style?.Minimum ?? points.Min(p => p.Value);
-        double max = style?.Maximum ?? points.Max(p => p.Value);
+        double min = style?.Minimum is double low ? ImperialUnits.Range(low, style.Source, style.RangeUnit) : points.Min(p => p.Value);
+        double max = style?.Maximum is double high ? ImperialUnits.Range(high, style.Source, style.RangeUnit) : points.Max(p => p.Value);
         double range = max - min;
         if (range == 0)
         {

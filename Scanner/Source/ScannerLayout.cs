@@ -39,21 +39,21 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, G
         "@rpm" => "Engine speed (automatic)",
         "@map" => "Manifold pressure (automatic)",
         "@throttle" => "Throttle position (automatic)",
-        _ => (Unit.Length == 0 ? Name : $"{Name} [{Unit}]") + (Occurrence == 0 ? "" : $" #{Occurrence + 1}")
+        _ => (Unit.Length == 0 ? Name : $"{Name} [{ImperialUnits.For(Unit).Unit}]") + (Occurrence == 0 ? "" : $" #{Occurrence + 1}")
     };
 }
 
 enum GaugeKind { Dial, Bar, Digital }
 enum GraphStatistic { Mean, Minimum, Maximum, Count }
 
-sealed record GaugeSetting(ChannelSource Source, string Label, GaugeKind Kind, double Minimum, double Maximum, int Color)
+sealed record GaugeSetting(ChannelSource Source, string Label, GaugeKind Kind, double Minimum, double Maximum, int Color, string RangeUnit = "")
 {
-    public override string ToString() => $"{Label}   ·   {Kind}   ·   {Minimum:G} to {Maximum:G}";
+    public override string ToString() => $"{Label}   ·   {Kind}   ·   {ImperialUnits.Range(Minimum, Source, RangeUnit):G4} to {ImperialUnits.Range(Maximum, Source, RangeUnit):G4} {ImperialUnits.For(RangeUnit.Length > 0 ? RangeUnit : ImperialUnits.SourceUnit(Source)).Unit}";
 }
 
-sealed record TraceSetting(ChannelSource Source, int Color, double? Minimum = null, double? Maximum = null)
+sealed record TraceSetting(ChannelSource Source, int Color, double? Minimum = null, double? Maximum = null, string RangeUnit = "")
 {
-    public override string ToString() => Minimum is null ? $"{Source}   ·   Auto scale" : $"{Source}   ·   {Minimum:G} to {Maximum:G}";
+    public override string ToString() => Minimum is null ? $"{Source}   ·   Auto scale" : $"{Source}   ·   {ImperialUnits.Range(Minimum!.Value, Source, RangeUnit):G4} to {ImperialUnits.Range(Maximum!.Value, Source, RangeUnit):G4}";
 }
 
 sealed record ChannelDisplay(ChannelSource Source, string Name, string Unit, double Scale, double Offset, int Decimals, bool Hidden)
@@ -61,9 +61,12 @@ sealed record ChannelDisplay(ChannelSource Source, string Name, string Unit, dou
     public override string ToString() => $"{Name}   ·   {Source}" + (Hidden ? "   ·   Hidden" : "");
 }
 
-sealed record GraphAxis(ChannelSource Source, double Width, double[] Breakpoints)
+sealed record GraphAxis(ChannelSource Source, double Width, double[] Breakpoints, string BinUnit = "")
 {
-    public double Bin(double value)
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ImperialConversion Conversion => ImperialUnits.For(BinUnit.Length > 0 ? BinUnit : ImperialUnits.SourceUnit(Source));
+    public double Bin(double value) => Conversion.Convert(BinOriginal(Conversion.Restore(value)));
+    private double BinOriginal(double value)
     {
         if (Breakpoints.Length == 0)
             return Math.Floor(value / Width) * Width;
@@ -81,7 +84,7 @@ sealed record GraphAxis(ChannelSource Source, double Width, double[] Breakpoints
 sealed record GraphSetting(GraphAxis X, GraphAxis Y, ChannelSource? Value, GraphStatistic Statistic, int MinimumSamples,
     string? Label = null, string? FilterExpression = null)
 {
-    public static readonly GraphSetting Default = new(new(ChannelSource.Rpm, 500, []), new(ChannelSource.Map, 10, []),
+    public static readonly GraphSetting Default = new(new(ChannelSource.Rpm, 500, []), new(ChannelSource.Map, 2, [], "psi"),
         null, GraphStatistic.Mean, 1, "Primary Histogram", null);
 
     public override string ToString() =>
@@ -91,7 +94,7 @@ sealed record GraphSetting(GraphAxis X, GraphAxis Y, ChannelSource? Value, Graph
 
 sealed record LiveChannelSetting(string Id, string Unit, string Label)
 {
-    public override string ToString() => $"{Label} [{Unit}]   ·   {Id}";
+    public override string ToString() => $"{Label} [{ImperialUnits.For(Unit).Unit}]   ·   {Id}";
 }
 
 sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, GraphSetting Graph,
@@ -102,7 +105,7 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
 
     public static ScannerLayout Default => new(
         [new(ChannelSource.Rpm, "Engine speed", GaugeKind.Dial, 0, 8000, 0),
-         new(ChannelSource.Map, "Manifold pressure", GaugeKind.Dial, 0, 120, 1),
+         new(ChannelSource.Map, "Manifold pressure", GaugeKind.Dial, 0, 20, 1, "psi"),
          new(ChannelSource.Throttle, "Throttle position", GaugeKind.Dial, 0, 100, 2)],
         null, GraphSetting.Default, [], null);
 
@@ -191,9 +194,9 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
 
     public bool IsValid() =>
         Gauges is { Length: <= 12 } && Gauges.All(g => g is not null && Source(g.Source) && Text(g.Label)
-            && Enum.IsDefined(g.Kind) && Range(g.Minimum, g.Maximum) && Color(g.Color))
+            && g.RangeUnit is { Length: <= 80 } && Enum.IsDefined(g.Kind) && Range(g.Minimum, g.Maximum) && Color(g.Color))
         && (Traces is null || Traces.Length <= MaximumTraces && Traces.All(t => t is not null && Source(t.Source) && Color(t.Color)
-            && (t.Minimum is null && t.Maximum is null || t.Minimum is double low && t.Maximum is double high && Range(low, high)))
+            && t.RangeUnit is { Length: <= 80 } && (t.Minimum is null && t.Maximum is null || t.Minimum is double low && t.Maximum is double high && Range(low, high)))
             && Traces.Select(t => t.Source).Distinct().Count() == Traces.Length)
         && ValidGraph(Graph)
         && (Graphs is null || Graphs.Length <= 16 && Graphs.All(ValidGraph))
@@ -220,7 +223,7 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
     }
 
     private static bool Axis(GraphAxis? axis) => axis is not null && Source(axis.Source) &&
-        double.IsFinite(axis.Width) && axis.Width > 0 && axis.Breakpoints is { Length: <= 120 }
+        axis.BinUnit is { Length: <= 80 } && double.IsFinite(axis.Width) && axis.Width > 0 && axis.Breakpoints is { Length: <= 120 }
         && axis.Breakpoints.All(double.IsFinite)
         && axis.Breakpoints.Zip(axis.Breakpoints.Skip(1), (a, b) => a < b).All(increasing => increasing);
     private static bool Source(ChannelSource? source) => source is not null && Text(source.Name)

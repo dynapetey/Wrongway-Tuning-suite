@@ -19,18 +19,19 @@ sealed class Channel(int key, int? pid, string name, string unit)
     public string Label => string.IsNullOrEmpty(Unit) ? Name : $"{Name} [{Unit}]";
     public ChannelDisplay? Display { get; set; }
     public string DisplayName => Display?.Name ?? Name;
-    public string DisplayUnit => Display?.Unit ?? Unit;
+    public string DisplayUnit => ImperialUnits.For(Display?.Unit ?? Unit).Unit;
     public string DisplayLabel => DisplayUnit.Length == 0 ? DisplayName : $"{DisplayName} [{DisplayUnit}]";
     public double? DisplayNumber(Reading? reading)
     {
         if (reading?.Number is not double value)
             return null;
         double converted = Display is { } display ? value * display.Scale + display.Offset : value;
+        converted = ImperialUnits.For(Display?.Unit ?? Unit).Convert(converted);
         return double.IsFinite(converted) ? converted : null;
     }
     public string FormatDisplay(double value) => Display is { } display
         ? value.ToString($"F{display.Decimals}", CultureInfo.InvariantCulture)
-        : value.ToString("0.##", CultureInfo.InvariantCulture);
+        : value.ToString(Math.Abs(value) is > 0 and < 0.01 ? "0.######" : "0.##", CultureInfo.InvariantCulture);
     public List<Reading> Readings { get; private set; } = [];
 
     public void Sort() => Readings = Readings.OrderBy(r => r.Time).ToList();
@@ -113,7 +114,7 @@ static class CsvLog
 
     private static void Write(ScanLog log, TextWriter writer)
     {
-        writer.WriteLine("Time (s)," + string.Join(",", log.Channels.Select(c => Escape(c.Label))));
+        writer.WriteLine("Time (s)," + string.Join(",", log.Channels.Select(c => Escape(c.DisplayLabel))));
         var queue = new PriorityQueue<(int Channel, int Index), (long Time, int Channel)>();
         for (int i = 0; i < log.Channels.Count; i++)
         {
@@ -132,7 +133,9 @@ static class CsvLog
             {
                 queue.Dequeue();
                 var readings = log.Channels[item.Channel].Readings;
-                values[item.Channel] = Escape(readings[item.Index].CsvValue);
+                var channel = log.Channels[item.Channel];
+                var reading = readings[item.Index];
+                values[item.Channel] = Escape(channel.DisplayNumber(reading)?.ToString("G17", Invariant) ?? reading.Text ?? "");
                 int next = item.Index + 1;
                 if (next >= readings.Count)
                     continue;

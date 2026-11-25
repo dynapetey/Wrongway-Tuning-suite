@@ -284,10 +284,10 @@ static class VcmTelemetryControls
         {
             if (channel is null)
                 return null;
-            var values = channel.Readings.Select(reading => reading.Number)
+            var values = channel.Readings.Select(channel.DisplayNumber)
                 .Where(value => value.HasValue && double.IsFinite(value.Value));
             double? extreme = minimum ? values.Min() : values.Max();
-            return extreme.HasValue ? new TelemetryValue(extreme.Value, channel.Unit) : null;
+            return extreme.HasValue ? new TelemetryValue(extreme.Value, channel.DisplayUnit) : null;
         }
 
         var rpm = MathChannel.Resolve(log.Channels, "50070");

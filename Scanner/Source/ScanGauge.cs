@@ -13,6 +13,8 @@ sealed class ScanGauge(GaugeSetting settings, IBrush accent) : Control
     private double? value;
     private string sourceUnit = "";
     private string valueLabel = "—";
+    private double minimum = ImperialUnits.Range(settings.Minimum, settings.Source, settings.RangeUnit);
+    private double maximum = ImperialUnits.Range(settings.Maximum, settings.Source, settings.RangeUnit);
 
     public void Update(Channel? channel, long cursor)
     {
@@ -34,9 +36,7 @@ sealed class ScanGauge(GaugeSetting settings, IBrush accent) : Control
             return;
         var center = new Point(Bounds.Width / 2, Bounds.Height / 2);
         double rangeValue = value.GetValueOrDefault();
-        if (settings.Source == ChannelSource.Map && sourceUnit.Equals("psi", StringComparison.OrdinalIgnoreCase))
-            rangeValue *= 6.894757;
-        double position = Math.Clamp((rangeValue - settings.Minimum) / (settings.Maximum - settings.Minimum), 0, 1);
+        double position = Math.Clamp((rangeValue - minimum) / (maximum - minimum), 0, 1);
         if (settings.Kind != GaugeKind.Dial)
         {
             Write(settings.Label, 12, DeskUi.ChartMuted, center.Y - 31);

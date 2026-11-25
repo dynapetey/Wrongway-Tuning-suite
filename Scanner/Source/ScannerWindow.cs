@@ -544,7 +544,7 @@ sealed partial class ScannerWindow : Window
             name.Margin = new Thickness(5, 0, 0, 0);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             string details = supported ? "Confirmed by the ECM in the last scan" : "Catalog definition";
-            ToolTip.SetTip(name, mapped ? $"{channel} · {string.Join(", ", channel.Units)} · {details}"
+            ToolTip.SetTip(name, mapped ? $"{channel} · {string.Join(", ", channel.Units.Select(u => ImperialUnits.For(u).Unit).Distinct())} · {details}"
                 : "The ECM reported this PID. A decoding definition is required for recording.");
             channelList.Children.Add(new Border
             {

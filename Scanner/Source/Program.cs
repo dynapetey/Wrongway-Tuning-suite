@@ -22,6 +22,7 @@ static class Program
             {
                 Console.WriteLine($"Live profile checks passed ({LiveScanner.SelfTest()} channels).");
                 ScannerLayout.SelfTest();
+                ImperialUnits.SelfTest();
                 Console.WriteLine("Layout persistence and histogram checks passed.");
                 MathChannel.SelfTest();
                 HistogramSnapshot.SelfTest();

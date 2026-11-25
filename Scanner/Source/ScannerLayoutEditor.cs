@@ -193,8 +193,8 @@ sealed partial class ScannerWindow
                 var source = SourcePicker(gauge?.Source, ChannelSource.Rpm);
                 var label = Field(gauge?.Label ?? "");
                 var kind = Choice(Enum.GetValues<GaugeKind>(), (int)(gauge?.Kind ?? GaugeKind.Dial));
-                var min = Field(gauge?.Minimum ?? 0);
-                var max = Field(gauge?.Maximum ?? 100);
+                var min = Field(gauge is null ? 0 : ImperialUnits.Range(gauge.Minimum, gauge.Source, gauge.RangeUnit));
+                var max = Field(gauge is null ? 100 : ImperialUnits.Range(gauge.Maximum, gauge.Source, gauge.RangeUnit));
                 var color = Choice(Colors, gauge?.Color ?? 0);
                 return Form(owner, "Gauge settings", Fields(("Channel", source), ("Label (blank uses channel name)", label),
                     ("Style", kind), ("Range minimum", min), ("Range maximum", max), ("Color", color)), () =>
@@ -202,7 +202,7 @@ sealed partial class ScannerWindow
                     var input = SelectedSource(source);
                     var range = ReadRange(min, max);
                     return new GaugeSetting(input, OptionalLabel(label, SourceLabel(input)), (GaugeKind)kind.SelectedIndex,
-                        range.Low, range.High, color.SelectedIndex);
+                        range.Low, range.High, color.SelectedIndex, DisplayUnit(input));
                 });
             });
         if (result is not null)
@@ -216,8 +216,8 @@ sealed partial class ScannerWindow
             {
                 var source = SourcePicker(trace?.Source);
                 var color = Choice(Colors, trace?.Color ?? 0);
-                var min = Field(trace?.Minimum);
-                var max = Field(trace?.Maximum);
+                var min = Field(trace?.Minimum is double low ? ImperialUnits.Range(low, trace.Source, trace.RangeUnit) : (double?)null);
+                var max = Field(trace?.Maximum is double high ? ImperialUnits.Range(high, trace.Source, trace.RangeUnit) : (double?)null);
                 return Form(owner, "Trace settings", Fields(("Channel", source), ("Color", color),
                     ("Range minimum", min), ("Range maximum", max)), () =>
                 {
@@ -225,7 +225,7 @@ sealed partial class ScannerWindow
                     if (string.IsNullOrWhiteSpace(min.Text) && string.IsNullOrWhiteSpace(max.Text))
                         return new TraceSetting(input, color.SelectedIndex);
                     var range = ReadRange(min, max);
-                    return new TraceSetting(input, color.SelectedIndex, range.Low, range.High);
+                    return new TraceSetting(input, color.SelectedIndex, range.Low, range.High, DisplayUnit(input));
                 });
             }, items => items.Select(item => item.Source).Distinct().Count() == items.Count ? null : "Each trace needs a different channel.");
         if (result is not null)
@@ -234,7 +234,7 @@ sealed partial class ScannerWindow
 
     private async Task EditDisplayChannels()
     {
-        var result = await EditList("Display channels", "Rename, rescale, change units, or hide a channel in the list. CSV export retains recorded values.",
+        var result = await EditList("Display channels", "Rename, rescale, change units, or hide a channel in the list. CSV export uses imperial display values.",
             scannerLayout.Channels, 128, (owner, display) =>
             {
                 var source = SourcePicker(display?.Source);
@@ -269,10 +269,10 @@ sealed partial class ScannerWindow
         var x = SourcePicker(previous.X.Source);
         var y = SourcePicker(previous.Y.Source);
         var measure = SourcePicker(previous.Value, automatic: true);
-        var xWidth = Field(previous.X.Width);
-        var yWidth = Field(previous.Y.Width);
-        var xBins = Field(string.Join(", ", previous.X.Breakpoints.Select(value => value.ToString("G", CultureInfo.InvariantCulture))));
-        var yBins = Field(string.Join(", ", previous.Y.Breakpoints.Select(value => value.ToString("G", CultureInfo.InvariantCulture))));
+        var xWidth = Field(previous.X.Width * previous.X.Conversion.Scale);
+        var yWidth = Field(previous.Y.Width * previous.Y.Conversion.Scale);
+        var xBins = Field(string.Join(", ", previous.X.Breakpoints.Select(value => previous.X.Conversion.Convert(value).ToString("G", CultureInfo.InvariantCulture))));
+        var yBins = Field(string.Join(", ", previous.Y.Breakpoints.Select(value => previous.Y.Conversion.Convert(value).ToString("G", CultureInfo.InvariantCulture))));
         var statistic = Choice(Enum.GetValues<GraphStatistic>(), (int)previous.Statistic);
         var minimum = Field(previous.MinimumSamples);
         var filterBox = Field(previous.FilterExpression ?? "");
@@ -337,7 +337,7 @@ sealed partial class ScannerWindow
                 void UpdateUnits()
                 {
                     var offered = (parameter.SelectedItem as LiveChannelChoice)?.Units ?? [];
-                    units.ItemsSource = offered;
+                    units.ItemsSource = offered.Select(u => new RecordingUnit(u)).ToArray();
                     int index = Array.IndexOf(offered, channel?.Unit);
                     units.SelectedIndex = index >= 0 ? index : offered.Length > 0 ? 0 : -1;
                 }
@@ -353,11 +353,11 @@ sealed partial class ScannerWindow
                 parameter.SelectionChanged += (_, _) => UpdateUnits();
                 UpdateUnits();
                 return Form(owner, "Live channel settings", Fields(("Search", search), ("PCM channel", parameter),
-                    ("Recording units", units), ("Label (blank uses catalog name)", label)), () =>
+                    ("Units", units), ("Label (blank uses catalog name)", label)), () =>
                 {
-                    if (parameter.SelectedItem is not LiveChannelChoice choice || units.SelectedItem is not string unit)
+                    if (parameter.SelectedItem is not LiveChannelChoice choice || units.SelectedItem is not RecordingUnit unit)
                         throw new FormatException("Choose a PCM channel and its recording units.");
-                    return new LiveChannelSetting(choice.Id, unit, OptionalLabel(label, choice.Name));
+                    return new LiveChannelSetting(choice.Id, unit.Source, OptionalLabel(label, choice.Name));
                 });
             }, items => items.Count == 0 ? "Add at least one live channel." :
                 items.Select(item => item.Id).Distinct().Count() != items.Count ? "Choose each PCM channel once." :
@@ -410,6 +410,8 @@ sealed partial class ScannerWindow
         return Choice(sources, index >= 0 ? index : sources.Count > 3 ? 3 : 0);
     }
 
+    private string DisplayUnit(ChannelSource source) => source.Resolve(log)?.DisplayUnit ?? ImperialUnits.For(ImperialUnits.SourceUnit(source)).Unit;
+
     private string SourceLabel(ChannelSource source) => source.Resolve(log)?.Name ?? source.ToString();
     private static ChannelSource SelectedSource(ComboBox box) => (box.SelectedItem as SourceChoice)?.Source
         ?? throw new FormatException("Choose a channel.");
@@ -449,7 +451,7 @@ sealed partial class ScannerWindow
         return (low, high);
     }
 
-    private static GraphAxis ReadAxis(ComboBox source, TextBox width, TextBox breaks)
+    private GraphAxis ReadAxis(ComboBox source, TextBox width, TextBox breaks)
     {
         string[] tokens = (breaks.Text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (tokens.Length > 120)
@@ -465,7 +467,8 @@ sealed partial class ScannerWindow
         double step = points.Length == 0 ? Number(width, "Bin width") : 1;
         if (step <= 0)
             throw new FormatException("Bin width must be positive.");
-        return new GraphAxis(SelectedSource(source), step, points);
+        var input = SelectedSource(source);
+        return new GraphAxis(input, step, points, DisplayUnit(input));
     }
 
     private Task<T[]?> EditList<T>(string title, string description, T[] initial, int maximum,
