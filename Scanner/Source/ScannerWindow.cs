@@ -117,7 +117,7 @@ sealed partial class ScannerWindow : Window
         pcmToolsMenu.IsVisible = File.Exists(PcmLauncher);
         var tuneButton = Button("Tune BIN", async () =>
         {
-            var editor = new TuneWindow(CurrentHistogramSnapshot()) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var editor = new TuneWindow(CurrentHistogramSnapshot, ImportHistogramAxes) { WindowStartupLocation = WindowStartupLocation.CenterOwner };
             await editor.ShowDialog(this);
         }, DeskUi.Table);
         var gaugeMenu = new MenuItem { Header = "Gauges" };
@@ -139,6 +139,7 @@ sealed partial class ScannerWindow : Window
                 DeskUi.Menu("_View", gaugeMenu, DeskUi.Action("Histogram graph", histogramButton),
                     DeskUi.Action("Fit time chart", zoomOut)),
                 DeskUi.Menu("_Layout", DeskUi.Action("Gauges…", editGauges), DeskUi.Action("Histogram graph…", editGraph),
+                    DeskUi.Action("P59 histogram presets…", Button("P59 histogram presets", LoadHistogramPresets)),
                     DeskUi.Action("Time chart…", editTraces), DeskUi.Action("Display channels…", editChannels),
                     DeskUi.Action("Live channels…", editLive),
                     DeskUi.Action("Import VCM XML…", Button("Import VCM XML", ImportVcmXml)),
@@ -390,6 +391,9 @@ sealed partial class ScannerWindow : Window
     private void SetLog(ScanLog next)
     {
         playback.Reset();
+        histogramSelections.Clear();
+        histogramPanels.Clear();
+        histogram = null;
         log = next;
         RefreshMaths();
         sessionText.Text = next.ScannerVersion is { } version
@@ -632,7 +636,7 @@ sealed partial class ScannerWindow : Window
         ActiveHistogram = histogram is { TooManyBins: false, Cells.Count: > 0 } current ? new
         {
             XLabel = current.X.DisplayLabel,
-            YLabel = current.Y.DisplayLabel,
+            YLabel = current.YLabel,
             ValueLabel = current.Value.DisplayLabel,
             Statistic = current.Settings.Statistic.ToString(),
             current.Settings.MinimumSamples,
@@ -648,6 +652,8 @@ sealed partial class ScannerWindow : Window
         if (playback.IsRunning)
             playOrigin = cursor - playback.ElapsedMilliseconds;
         RefreshChart();
+        if (replayHistogram && instrumentTabs.SelectedIndex == 1)
+            UpdateHistogram(force: true);
     }
 
     private void FitView()
@@ -713,6 +719,8 @@ sealed partial class ScannerWindow : Window
         if (cursor == log.End)
             playback.Stop();
         RefreshChart();
+        if (replayHistogram && instrumentTabs.SelectedIndex == 1)
+            UpdateHistogram(force: cursor == log.End);
     }
 
     private void RefreshChart()

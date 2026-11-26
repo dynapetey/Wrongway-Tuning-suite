@@ -82,9 +82,18 @@ sealed record ChannelInputSpec(string RawToken, string BaseToken, ChannelWindowO
         if (Operation == ChannelWindowOp.Value)
         {
             var current = channel.AsOf(time);
-            if (current?.Number is not double val || time - current.Time > maximumAgeMs)
+            if (current is null || time - current.Time > maximumAgeMs)
                 return null;
-            return val;
+            if (current.Number is double number)
+                return number;
+            if (channel.Unit.Equals("Boolean", StringComparison.OrdinalIgnoreCase))
+                return current.Text?.Trim().ToUpperInvariant() switch
+                {
+                    "ACTIVE" or "ON" or "CLOSED" or "CLOSED LOOP" or "TRUE" => 1,
+                    "INACTIVE" or "OFF" or "OPEN" or "OPEN LOOP" or "FALSE" => 0,
+                    _ => null
+                };
+            return null;
         }
 
         if (Operation == ChannelWindowOp.Prev)
@@ -294,6 +303,14 @@ sealed record MathSetting(string Name, string Unit, string Formula, bool Enabled
         IReadOnlyDictionary<string, int> byName, out int index)
     {
         string baseToken = ChannelInputSpec.Parse(token).BaseToken;
+        if (baseToken.Contains('~'))
+        {
+            foreach (string candidate in baseToken.Split('~'))
+                if (TryMatchSetting(candidate, items, byName, out index))
+                    return true;
+            index = -1;
+            return false;
+        }
         var parts = baseToken.Split('|', 2, StringSplitOptions.TrimEntries);
         if (byName.TryGetValue(parts[0], out index) &&
             (parts.Length == 1 || items[index].Setting.Unit.Trim().Equals(parts[1], StringComparison.OrdinalIgnoreCase)))
@@ -688,6 +705,11 @@ sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec
 
     public Channel Output => output;
 
+    public static string[] MissingFilterChannels(ScanLog log, string? expression) =>
+        string.IsNullOrWhiteSpace(expression) ? [] : new MathFormula(expression).InputSpecs
+            .Where(spec => Resolve(log.Channels, spec.BaseToken, includeMath: true) is null)
+            .Select(spec => spec.BaseToken).Distinct().ToArray();
+
     public static Func<long, bool>? BuildFilter(ScanLog log, string? filterExpression)
     {
         if (string.IsNullOrWhiteSpace(filterExpression))
@@ -715,6 +737,12 @@ sealed class MathChannel(Channel output, (Channel Channel, ChannelInputSpec Spec
     public static Channel? Resolve(IEnumerable<Channel> channels, string token, bool includeMath = false)
     {
         string baseToken = ChannelInputSpec.Parse(token).BaseToken;
+        if (baseToken.Contains('~'))
+        {
+            var alternatives = channels.ToArray();
+            return baseToken.Split('~').Select(candidate => Resolve(alternatives, candidate, includeMath))
+                .FirstOrDefault(channel => channel is not null);
+        }
         var parts = baseToken.Split('|', 2, StringSplitOptions.TrimEntries);
         string name = parts[0];
         string? explicitUnit = parts.Length > 1 ? parts[1] : null;

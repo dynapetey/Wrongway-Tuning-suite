@@ -45,6 +45,44 @@ on Wayland sessions.
   Choose a new filename. The app can reopen this CSV and other comma-delimited
   logs with a time column in seconds or milliseconds.
 
+## P59 tuning histograms
+
+Open **Layout → P59 histogram presets** and choose a group. This replaces the
+active histogram tables. Use **Save layout as** to keep a custom set of tables
+and math channels. To collect data live, choose the needed inputs in
+**Layout → Live channels**. Missing inputs are listed on each affected table,
+including state flags needed by its filter. The presets use the recorded
+channels and never infer unsupported transmission PIDs.
+
+- **MAF Tuning** uses single-row frequency tables. **Speed Density** uses
+  RPM and manifold pressure. Both have separate wideband and closed-loop
+  corrections with a 25-sample threshold. The VE correction filters require
+  a numeric or Boolean `VE Isolated` channel and the wideband filters require
+  `Wideband Ready` or a valid reading from the configured AEM input.
+- Select the AEM 30-0300 input format when loading a group to create its math
+  channel. The pressure option reverses the suite's GM A/C pressure conversion
+  before applying the [AEM 30-0300 transfer curve](https://documents.aemelectronics.com/techlibrary_30-0300_x-series_wideband_uego_afr_sensor_gauge.pdf).
+  Edit the resulting formula under **Tools → Maths**. AFR corrections accept
+  a logged commanded AFR or derive it from commanded EQ and logged
+  stoichiometric AFR.
+- **Edit graph** sets breakpoints, filters, heatmap colors and range, minimum
+  samples and value delay. Built-in wideband errors pair the delayed measured
+  signal with the earlier commanded value and axis samples. **Follow replay
+  cursor** builds the tables as playback advances. Visits and elapsed seconds
+  count contiguous valid samples in a cell, with gaps over 500 ms starting
+  a new visit.
+- Click a populated cell to select it, or Ctrl-click to toggle multiple
+  cells. **Copy values** copies the current grid as tab-separated values
+  using the current selection. **3D surface** displays the populated bins.
+  **Smooth calibration transfer** averages populated neighboring bins
+  eligible for transfer.
+- In **Tune BIN**, load a matching BIN and XDF, select the target table,
+  then choose **Edit → Send XDF axes to histogram** to replace the selected
+  scanner histogram's breakpoints. Choose **Apply Histogram** to set the
+  axis orientation, operation, correction strength and clamps. Review
+  the encoded before/after values before applying. The resulting edit can be
+  undone or redone, compared with another BIN, or saved to a new BIN.
+
 ## Scanner Maths & VCM Telemetry Functions
 
 Choose **Tools → Maths → Add**, select a VCM Telemetry preset, or click

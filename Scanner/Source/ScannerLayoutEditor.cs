@@ -96,6 +96,8 @@ sealed partial class ScannerWindow
             SetStatus(ex.Message, true);
             return false;
         }
+        if (scannerLayout.Graph != next.Graph || scannerLayout.Graphs != next.Graphs)
+            histogramSelections.Clear();
         bool mathsChanged = scannerLayout.Maths != next.Maths;
         scannerLayout = next;
         if (mathsChanged)
@@ -267,7 +269,7 @@ sealed partial class ScannerWindow
         var previous = ActiveGraphSetting();
         var labelBox = Field(previous.Label ?? "Primary Histogram");
         var x = SourcePicker(previous.X.Source);
-        var y = SourcePicker(previous.Y.Source);
+        var y = SourcePicker(previous.Y.Source, singleRow: true);
         var measure = SourcePicker(previous.Value, automatic: true);
         var xWidth = Field(previous.X.Width * previous.X.Conversion.Scale);
         var yWidth = Field(previous.Y.Width * previous.Y.Conversion.Scale);
@@ -275,6 +277,11 @@ sealed partial class ScannerWindow
         var yBins = Field(string.Join(", ", previous.Y.Breakpoints.Select(value => previous.Y.Conversion.Convert(value).ToString("G", CultureInfo.InvariantCulture))));
         var statistic = Choice(Enum.GetValues<GraphStatistic>(), (int)previous.Statistic);
         var minimum = Field(previous.MinimumSamples);
+        var delay = Field(previous.ValueDelayMs);
+        var lower = Field(previous.HeatmapMin);
+        var upper = Field(previous.HeatmapMax);
+        var lowColor = Field(previous.LowColor.ToString("X8"));
+        var highColor = Field(previous.HighColor.ToString("X8"));
         var filterBox = Field(previous.FilterExpression ?? "");
         filterBox.Watermark = "Optional VCM filter, e.g. [50090.156]>22 or [CL]=1";
         var result = await Form(this, "Histogram graph settings", Fields(
@@ -283,7 +290,9 @@ sealed partial class ScannerWindow
             ("X breakpoints (optional, comma-separated)", xBins), ("Y axis (rows)", y), ("Y bin width", yWidth),
             ("Y breakpoints (optional, comma-separated)", yBins), ("Value channel", measure),
             ("Cell statistic", statistic), ("Minimum samples per cell", minimum),
-            ("Cell filter formula (optional)", filterBox)), () =>
+            ("Cell filter formula (optional)", filterBox), ("Value delay (ms)", delay),
+            ("Heatmap minimum (optional)", lower), ("Heatmap maximum (optional)", upper),
+            ("Low color (AARRGGBB)", lowColor), ("High color (AARRGGBB)", highColor)), () =>
         {
             var xAxis = ReadAxis(x, xWidth, xBins);
             var yAxis = ReadAxis(y, yWidth, yBins);
@@ -292,10 +301,19 @@ sealed partial class ScannerWindow
             string? filterText = filterBox.Text?.Trim();
             if (!string.IsNullOrEmpty(filterText))
                 _ = new MathFormula(filterText);
+            bool autoRange = string.IsNullOrWhiteSpace(lower.Text) && string.IsNullOrWhiteSpace(upper.Text);
+            var range = autoRange ? default : ReadRange(lower, upper);
+            uint ReadColor(TextBox field)
+            {
+                if (!uint.TryParse(field.Text?.Trim().TrimStart('#'), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint color))
+                    throw new FormatException("Enter the heatmap colors as hexadecimal AARRGGBB.");
+                return color;
+            }
             return new GraphSetting(xAxis, yAxis, (measure.SelectedItem as SourceChoice)?.Source,
                 (GraphStatistic)statistic.SelectedIndex, Whole(minimum, "Minimum samples", 1, 1_000_000),
                 OptionalLabel(labelBox, "Histogram"),
-                string.IsNullOrEmpty(filterText) ? null : filterText);
+                string.IsNullOrEmpty(filterText) ? null : filterText, Whole(delay, "Value delay", 0, 5000),
+                autoRange ? null : range.Low, autoRange ? null : range.High, ReadColor(lowColor), ReadColor(highColor));
         }, height: 730);
         if (result is not null)
         {
@@ -374,9 +392,11 @@ sealed partial class ScannerWindow
         public override string ToString() => Label;
     }
 
-    private ComboBox SourcePicker(ChannelSource? selected, ChannelSource? fallback = null, bool automatic = false)
+    private ComboBox SourcePicker(ChannelSource? selected, ChannelSource? fallback = null, bool automatic = false, bool singleRow = false)
     {
         var sources = new List<SourceChoice>();
+        if (singleRow)
+            sources.Add(new(ChannelSource.SingleRow, "Single row"));
         if (automatic)
             sources.Add(new(null, "Automatic value channel"));
         sources.AddRange(new[] { ChannelSource.Rpm, ChannelSource.Map, ChannelSource.Throttle }
@@ -453,6 +473,8 @@ sealed partial class ScannerWindow
 
     private GraphAxis ReadAxis(ComboBox source, TextBox width, TextBox breaks)
     {
+        if (SelectedSource(source) == ChannelSource.SingleRow)
+            return new GraphAxis(ChannelSource.SingleRow, 1, [0]);
         string[] tokens = (breaks.Text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (tokens.Length > 120)
             throw new FormatException("Use at most 120 breakpoints per axis.");
