@@ -26,6 +26,7 @@ static class Program
                 Console.WriteLine("Layout persistence and histogram checks passed.");
                 MathChannel.SelfTest();
                 HistogramSnapshot.SelfTest();
+                ScannerTuningPresets.SelfTest();
                 Console.WriteLine("Formula, VCM window methods, voltage units and time alignment checks passed.");
                 VcmTelemetryControls.SelfTest();
                 Console.WriteLine("VCM frame preview and XML import checks passed.");

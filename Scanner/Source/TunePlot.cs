@@ -27,6 +27,7 @@ sealed class TunePlot : Control
     private readonly List<(Point Point, int Row, int Column)> points = [];
     private TuneParameter? parameter;
     private double[,]? values;
+    private string valueUnit = "", columnUnit = "", rowUnit = "";
     private double low, high;
     private double yaw, tilt = .58, zoom = 1;
     private (int Row, int Column) selected;
@@ -143,7 +144,16 @@ sealed class TunePlot : Control
         if (parameter != map)
             ResetView();
         parameter = map;
+        SetSeries(data, minimum, maximum, row, column, map?.Units ?? "", map?.ColumnUnits ?? "", map?.RowUnits ?? "");
+    }
+
+    public void SetSeries(double[,]? data, double minimum, double maximum, int row, int column,
+        string valueLabel, string xLabel, string yLabel)
+    {
         values = data;
+        valueUnit = valueLabel;
+        columnUnit = xLabel;
+        rowUnit = yLabel;
         low = minimum;
         high = maximum;
         selected = (row, column);
@@ -166,13 +176,13 @@ sealed class TunePlot : Control
         base.Render(context);
         context.FillRectangle(DeskUi.ChartBackground, new Rect(Bounds.Size));
         points.Clear();
-        if (values is null || parameter is null || Bounds.Width < 100 || Bounds.Height < 70 ||
+        if (values is null || Bounds.Width < 100 || Bounds.Height < 70 ||
             !double.IsFinite(low) || !double.IsFinite(high - low))
             return;
         if (surface)
-            DrawSurface(context, values, parameter);
+            DrawSurface(context, values);
         else
-            DrawProfile(context, values, parameter);
+            DrawProfile(context, values);
         if (editPoint is not null && dragged)
         {
             context.DrawEllipse(DeskUi.Blue, Selection, editCursor, 4, 4);
@@ -181,7 +191,7 @@ sealed class TunePlot : Control
         }
     }
 
-    private void DrawProfile(DrawingContext context, double[,] data, TuneParameter map)
+    private void DrawProfile(DrawingContext context, double[,] data)
     {
         var area = new Rect(49, 14, Bounds.Width - 65, Bounds.Height - 41);
         for (int i = 0; i < 5; i++)
@@ -193,14 +203,14 @@ sealed class TunePlot : Control
         }
         context.DrawLine(AxisLine, area.TopLeft, area.BottomLeft);
         context.DrawLine(AxisLine, area.BottomLeft, area.BottomRight);
-        Write(context, map.Units.Length > 0 ? $"Decoded value ({map.Units})" : "Decoded value",
+        Write(context, valueUnit.Length > 0 ? $"Decoded value ({valueUnit})" : "Decoded value",
             area.Left, area.Bottom + 6, DeskUi.Muted);
         int step = Math.Max(1, data.Length / Math.Max(1, (int)area.Width));
         (Point Point, int Row)? previous = null;
         using var clip = context.PushClip(area.Inflate(3));
         for (int index = 0; index < data.Length; index++)
         {
-            int row = index / map.Columns, col = index % map.Columns;
+            int row = index / data.GetLength(1), col = index % data.GetLength(1);
             if (index % step != 0 && (row, col) != selected && index + 1 != data.Length)
                 continue;
             double value = data[row, col];
@@ -209,7 +219,7 @@ sealed class TunePlot : Control
                 previous = null;
                 continue;
             }
-            var point = new Point(area.Left + index * area.Width / (data.Length - 1), area.Bottom - Unit(value) * area.Height);
+            var point = new Point(area.Left + index * area.Width / Math.Max(1, data.Length - 1), area.Bottom - Unit(value) * area.Height);
             IBrush ink = ColorAt(value);
             if (previous is { } prior)
                 context.DrawLine(new Pen(ink, prior.Row == row ? 1.2 : .8), prior.Point, point);
@@ -219,7 +229,7 @@ sealed class TunePlot : Control
         }
     }
 
-    private void DrawSurface(DrawingContext context, double[,] data, TuneParameter map)
+    private void DrawSurface(DrawingContext context, double[,] data)
     {
         double sin = Math.Sin(yaw), cos = Math.Cos(yaw);
         double pitch = Math.Sin(tilt), rise = Math.Cos(tilt);
@@ -227,8 +237,8 @@ sealed class TunePlot : Control
         Point Project(double x, double y, double z) => new(
             Bounds.Width * .5 + (x * cos - y * sin) * scale,
             Bounds.Height * .61 + ((x * sin + y * cos) * pitch - z * rise) * scale);
-        double X(int col) => map.Columns > 1 ? (double)col / (map.Columns - 1) - .5 : 0;
-        double Y(int row) => map.Rows > 1 ? (double)row / (map.Rows - 1) - .5 : 0;
+        double X(int col) => data.GetLength(1) > 1 ? (double)col / (data.GetLength(1) - 1) - .5 : 0;
+        double Y(int row) => data.GetLength(0) > 1 ? (double)row / (data.GetLength(0) - 1) - .5 : 0;
         double Z(double value) => .05 + Unit(value) * .62;
         for (int i = 0; i <= 8; i++)
         {
@@ -236,8 +246,8 @@ sealed class TunePlot : Control
             context.DrawLine(GridLine, Project(-.5, tick, 0), Project(.5, tick, 0));
             context.DrawLine(GridLine, Project(tick, -.5, 0), Project(tick, .5, 0));
         }
-        int[] rows = Sample(map.Rows, selected.Row);
-        int[] columns = Sample(map.Columns, selected.Column);
+        int[] rows = Sample(data.GetLength(0), selected.Row);
+        int[] columns = Sample(data.GetLength(1), selected.Column);
         var faces = new List<(double Depth, int A, int B)>();
         for (int i = 0; i + 1 < rows.Length; i++)
         for (int j = 0; j + 1 < columns.Length; j++)
@@ -273,7 +283,7 @@ sealed class TunePlot : Control
             points.Add((point, row, col));
         }
         Write(context, "Drag to orbit · Scroll to zoom", 10, 6, DeskUi.Muted);
-        string axes = string.Join("  ×  ", new[] { map.ColumnUnits, map.RowUnits }.Where(text => text.Length > 0));
+        string axes = string.Join("  ×  ", new[] { columnUnit, rowUnit }.Where(text => text.Length > 0));
         Write(context, axes, 10, Bounds.Height - 17, DeskUi.Muted);
     }
 

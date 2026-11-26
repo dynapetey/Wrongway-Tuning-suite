@@ -4,6 +4,7 @@ namespace WrongWay;
 
 sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, Guid? MathId = null, int? VcmId = null)
 {
+    public static readonly ChannelSource SingleRow = new("@single-row");
     public static readonly ChannelSource Rpm = new("@rpm");
     public static readonly ChannelSource Map = new("@map");
     public static readonly ChannelSource Throttle = new("@throttle");
@@ -20,6 +21,8 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, G
                 (Unit.Length == 0 || VcmConfigImporter.SameUnit(channel.Unit, Unit))).Take(2).ToArray();
             return candidates.Length == 1 ? candidates[0] : null;
         }
+        if (Name.StartsWith("@channel:", StringComparison.Ordinal))
+            return MathChannel.Resolve(log.Channels, Name[9..], includeMath: true);
         return Name switch
         {
             "@rpm" => log.Find(12, "RPM") ?? log.Find(12, "Engine Speed") ?? log.Find(50070, "RPM"),
@@ -36,15 +39,17 @@ sealed record ChannelSource(string Name, string Unit = "", int Occurrence = 0, G
 
     public override string ToString() => Name switch
     {
+        "@single-row" => "Single row",
         "@rpm" => "Engine speed (automatic)",
         "@map" => "Manifold pressure (automatic)",
         "@throttle" => "Throttle position (automatic)",
-        _ => (Unit.Length == 0 ? Name : $"{Name} [{ImperialUnits.For(Unit).Unit}]") + (Occurrence == 0 ? "" : $" #{Occurrence + 1}")
+        _ => (Name.StartsWith("@channel:", StringComparison.Ordinal) ? Name[9..].Split('~')[0] :
+            Unit.Length == 0 ? Name : $"{Name} [{ImperialUnits.For(Unit).Unit}]") + (Occurrence == 0 ? "" : $" #{Occurrence + 1}")
     };
 }
 
 enum GaugeKind { Dial, Bar, Digital }
-enum GraphStatistic { Mean, Minimum, Maximum, Count }
+enum GraphStatistic { Mean, Minimum, Maximum, Count, Last, StandardDeviation, Visits, Duration }
 
 sealed record GaugeSetting(ChannelSource Source, string Label, GaugeKind Kind, double Minimum, double Maximum, int Color, string RangeUnit = "")
 {
@@ -82,7 +87,8 @@ sealed record GraphAxis(ChannelSource Source, double Width, double[] Breakpoints
 }
 
 sealed record GraphSetting(GraphAxis X, GraphAxis Y, ChannelSource? Value, GraphStatistic Statistic, int MinimumSamples,
-    string? Label = null, string? FilterExpression = null)
+    string? Label = null, string? FilterExpression = null, int ValueDelayMs = 0,
+    double? HeatmapMin = null, double? HeatmapMax = null, uint LowColor = 0xff3064a5, uint HighColor = 0xffa94b33)
 {
     public static readonly GraphSetting Default = new(new(ChannelSource.Rpm, 500, []), new(ChannelSource.Map, 2, [], "psi"),
         null, GraphStatistic.Mean, 1, "Primary Histogram", null);
@@ -212,6 +218,9 @@ sealed record ScannerLayout(GaugeSetting[] Gauges, TraceSetting[]? Traces, Graph
     {
         if (g is null || !Axis(g.X) || !Axis(g.Y) || (g.Value is not null && !Source(g.Value))
             || !Enum.IsDefined(g.Statistic) || g.MinimumSamples is < 1 or > 1_000_000
+            || g.ValueDelayMs is < 0 or > 5000
+            || !(g.HeatmapMin is null && g.HeatmapMax is null ||
+                g.HeatmapMin is double low && g.HeatmapMax is double high && Range(low, high))
             || (g.Label is not null && g.Label.Length > 120))
             return false;
         if (!string.IsNullOrWhiteSpace(g.FilterExpression))

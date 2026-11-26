@@ -55,7 +55,8 @@ sealed partial class TuneWindow : Window
         ItemsSource = new[] { "Set to", "Add", "Multiply", "Change by %" }, SelectedIndex = 0, Width = 107
     };
     private readonly Button pickXdf, compare, save, undo, redo, apply, applyText, warnings, userDefined, applyHistogram, maths;
-    private readonly HistogramSnapshot? histogramSnapshot;
+    private readonly Func<HistogramSnapshot?>? getHistogram;
+    private readonly Action<TuneParameter, bool>? importHistogramAxes;
     private readonly Border editStrip, textStrip;
     private readonly Grid mapRows, mapTop;
     private readonly Border editorPane, referencePane;
@@ -76,9 +77,10 @@ sealed partial class TuneWindow : Window
     private bool allowClose, dialogOpen, updatingGroups, updatingList;
     private string? lastCopy;
 
-    public TuneWindow(HistogramSnapshot? histogram = null)
+    public TuneWindow(Func<HistogramSnapshot?>? getHistogram = null, Action<TuneParameter, bool>? importHistogramAxes = null)
     {
-        histogramSnapshot = histogram;
+        this.getHistogram = getHistogram;
+        this.importHistogramAxes = importHistogramAxes;
         Title = "WrongWay Tuner · P59 Map Workspace";
         Width = 1240;
         Height = 760;
@@ -159,7 +161,8 @@ sealed partial class TuneWindow : Window
                     DeskUi.Action("Save BIN copy", save)),
                 DeskUi.Menu("_Edit", DeskUi.Action("Undo", undo), DeskUi.Action("Redo", redo),
                     DeskUi.Action("User Defined Parameters", userDefined),
-                    DeskUi.Action("Apply Histogram…", applyHistogram)),
+                    DeskUi.Action("Apply Histogram…", applyHistogram),
+                    TableAction("Send XDF axes to histogram…", ImportHistogramAxes)),
                 MakeTableMenu(),
                 DeskUi.Menu("_Maths", DeskUi.Action("Apply formula to selection…", maths),
                     TableAction("Edit maths presets…", EditMathsPresets),
@@ -679,14 +682,34 @@ sealed partial class TuneWindow : Window
     }
 
 
-    private sealed record HistogramEdit(int Cells);
+    private async Task ImportHistogramAxes()
+    {
+        if (importHistogramAxes is null || current is not { } table || image is null)
+            return;
+        var axisOrder = new ComboBox { ItemsSource = new[] { "Use table columns as X", "Use table rows as X" }, SelectedIndex = 0 };
+        var imported = await DeskUi.Form(this, $"Send XDF axes · {table.Title}",
+            DeskUi.Fields(("Axis mapping", axisOrder)), () =>
+            {
+                importHistogramAxes(table, axisOrder.SelectedIndex == 1);
+                return table;
+            }, height: 245);
+        if (imported is not null)
+        {
+            RefreshButtons();
+            Report($"Sent {table.Title} breakpoints to the selected scanner histogram.");
+        }
+    }
+
+    private sealed record HistogramEdit(TuneImage Preview, List<(int Row, int Column, double Value)> Values);
+
 
     private async Task ApplyHistogram()
     {
         if (image is not { } activeImage || current?.Editable != true || current.IsText || current.Mask != 0 ||
-            histogramSnapshot is null)
+            getHistogram?.Invoke() is not { } histogramSnapshot)
             return;
         var target = current;
+        bool percentage = histogramSnapshot.ValueLabel.EndsWith("[%]", StringComparison.Ordinal);
         var mode = new ComboBox
         {
             ItemsSource = new[]
@@ -694,9 +717,10 @@ sealed partial class TuneWindow : Window
                 "Change by % (1 + cell / 100)",
                 "Multiply by cell value",
                 "Add cell value",
-                "Set to cell value"
+                "Set to cell value",
+                "Subtract cell value"
             },
-            SelectedIndex = 0
+            SelectedIndex = percentage ? 0 : 3
         };
         var axisOrder = new ComboBox
         {
@@ -707,9 +731,10 @@ sealed partial class TuneWindow : Window
             },
             SelectedIndex = 0
         };
-        var bilinear = new CheckBox { Content = "Bilinear interpolation between histogram bins", IsChecked = true };
+        var bilinear = new CheckBox { Content = "Bilinear interpolation between histogram bins", IsChecked = false };
         var minSamplesBox = new TextBox { Text = histogramSnapshot.MinimumSamples.ToString(System.Globalization.CultureInfo.InvariantCulture) };
-        var clampBox = new TextBox { Text = "25", Watermark = "Optional max % step (blank = none)" };
+        var strength = new TextBox { Text = "100" };
+        var clampBox = new TextBox { Text = percentage ? "25" : "", Watermark = "Optional max % step (blank = none)" };
         var summary = DeskUi.Label(
             $"Source: {histogramSnapshot.ValueLabel} ({histogramSnapshot.Statistic}) · {histogramSnapshot.Cells.Count} bins",
             12, Accent);
@@ -718,6 +743,7 @@ sealed partial class TuneWindow : Window
             ("Operation", mode),
             ("Axis mapping", axisOrder),
             ("Minimum samples per bin", minSamplesBox),
+            ("Correction strength (%)", strength),
             ("Max % step clamp (optional)", clampBox));
         fields.Children.Add(bilinear);
 
@@ -725,6 +751,10 @@ sealed partial class TuneWindow : Window
         {
             if (!int.TryParse(minSamplesBox.Text, out int minSamples) || minSamples < 1)
                 throw new FormatException("Minimum samples must be a positive whole number.");
+            if (!double.TryParse(strength.Text, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double percent) ||
+                !double.IsFinite(percent) || percent is < 0 or > 100)
+                throw new FormatException("Correction strength must be between 0 and 100 percent.");
             double? maxPct = null;
             if (!string.IsNullOrWhiteSpace(clampBox.Text))
             {
@@ -734,21 +764,22 @@ sealed partial class TuneWindow : Window
                     throw new FormatException("Max % step clamp must be a positive number or blank.");
                 maxPct = parsedClamp;
             }
-            double[] colValues = target.ColumnLabels.Select(l =>
-                double.TryParse(l, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) && double.IsFinite(v)
-                    ? v : throw new FormatException($"Column label '{l}' is not numeric.")).ToArray();
-            double[] rowValues = target.RowLabels.Select(l =>
-                double.TryParse(l, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) && double.IsFinite(v)
-                    ? v : throw new FormatException($"Row label '{l}' is not numeric.")).ToArray();
-
             bool swap = axisOrder.SelectedIndex == 1;
             bool useBilinear = bilinear.IsChecked == true;
+            if (histogramSnapshot.SingleRow && (swap ? target.Columns : target.Rows) > 1)
+                throw new FormatException("Match the one-dimensional histogram to a one-dimensional table.");
+            var xConversion = HistogramSnapshot.MatchUnits(swap ? target.RowUnits : target.ColumnUnits, histogramSnapshot.XUnit);
+            var yConversion = histogramSnapshot.SingleRow ? default :
+                HistogramSnapshot.MatchUnits(swap ? target.ColumnUnits : target.RowUnits, histogramSnapshot.YUnit);
+            double[] xValues = HistogramSnapshot.ParseAxis(swap ? target.RowLabels : target.ColumnLabels);
+            double[] yValues = histogramSnapshot.SingleRow ? [0] :
+                HistogramSnapshot.ParseAxis(swap ? target.ColumnLabels : target.RowLabels);
             var edits = new List<(int Row, int Column, double Value)>();
             for (int r = 0; r < target.Rows; r++)
             for (int c = 0; c < target.Columns; c++)
             {
-                double hx = swap ? rowValues[r] : colValues[c];
-                double hy = swap ? colValues[c] : rowValues[r];
+                double hx = xConversion.Convert(xValues[swap ? r : c]);
+                double hy = histogramSnapshot.SingleRow ? 0 : yConversion.Convert(yValues[swap ? c : r]);
                 if (histogramSnapshot.Sample(hx, hy, minSamples, useBilinear) is not double cell)
                     continue;
                 double before = activeImage.Read(target, r, c);
@@ -757,8 +788,10 @@ sealed partial class TuneWindow : Window
                     0 => before * (1 + cell / 100.0),
                     1 => before * cell,
                     2 => before + cell,
+                    4 => before - cell,
                     _ => cell
                 };
+                after = before + (after - before) * (percent / 100);
                 if (!double.IsFinite(after))
                     throw new FormatException("The selected operation returned a nonfinite correction.");
                 if (maxPct is double limit)
@@ -772,18 +805,43 @@ sealed partial class TuneWindow : Window
             }
             if (edits.Count == 0)
                 throw new FormatException("No histogram bins overlapped this table's numeric axes with enough samples.");
-            try { activeImage.Apply(target, edits, AllParameters); }
+            var preview = activeImage.Snapshot();
+            try { preview.Apply(target, edits, AllParameters); }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
             { throw new FormatException(ex.Message, ex); }
-            return new HistogramEdit(edits.Count);
+            return new HistogramEdit(preview, edits);
         }, height: 470);
 
-        if (applied is not null)
+        if (applied is null)
+            return;
+
+        var changed = applied.Values.Where(edit => activeImage.Read(target, edit.Row, edit.Column) !=
+            applied.Preview.Read(target, edit.Row, edit.Column)).ToArray();
+        if (changed.Length == 0)
         {
-            Paint();
-            RefreshFiles();
-            Report($"Applied histogram correction to {applied.Cells} cell(s) of {target.Title}.");
+            Report("The histogram correction did not change any encoded calibration values.");
+            return;
         }
+        string changes = string.Join(Environment.NewLine, changed.Select(edit =>
+            $"{target.RowLabels[edit.Row]} / {target.ColumnLabels[edit.Column]}    " +
+            $"{target.Format(activeImage.Read(target, edit.Row, edit.Column), true)} → " +
+            target.Format(applied.Preview.Read(target, edit.Row, edit.Column), true)));
+        var confirmed = await DeskUi.Form(this, $"Preview · {target.Title}",
+            DeskUi.Fields(($"{changed.Length} changed cells · Row / column", new TextBox
+            {
+                Text = changes, IsReadOnly = true, Height = 270, AcceptsReturn = true
+            })), () => applied, height: 460);
+        if (confirmed is null)
+            return;
+        try { activeImage.Apply(target, confirmed.Values, AllParameters); }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            Report(ex.Message, true);
+            return;
+        }
+        Paint();
+        RefreshFiles();
+        Report($"Applied histogram correction to {changed.Length} cell(s) of {target.Title}.");
     }
 
     private void ApplyText()
@@ -864,7 +922,7 @@ sealed partial class TuneWindow : Window
         pickXdf.IsEnabled = image is not null;
         userDefined.IsEnabled = image is not null && userDefinitionsReadable;
         maths.IsEnabled = image is not null && current is { Editable: true, IsText: false, Mask: 0, Display: TuneFormat.Number };
-        applyHistogram.IsEnabled = image is not null && histogramSnapshot is not null &&
+        applyHistogram.IsEnabled = image is not null && getHistogram?.Invoke() is not null &&
             current is { Editable: true, IsText: false, Mask: 0 } && (current.Rows > 1 || current.Columns > 1);
         compare.IsEnabled = image is not null;
         warnings.IsEnabled = definition?.Skipped.Count > 0;
