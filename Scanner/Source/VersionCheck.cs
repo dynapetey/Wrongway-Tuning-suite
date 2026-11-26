@@ -222,6 +222,9 @@ namespace WrongWayScanner
 
         private static string ExtractVersion(string versionString)
         {
+            const string scannerPrefix = "scanner-";
+            if (versionString.StartsWith(scannerPrefix, StringComparison.OrdinalIgnoreCase))
+                versionString = versionString[scannerPrefix.Length..];
             return versionString.TrimStart('v', 'V');
         }
 

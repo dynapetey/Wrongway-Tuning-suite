@@ -150,6 +150,20 @@ sealed partial class ScannerWindow
         }
     }
 
+    private void ApplyBundledVcmPreset(string path)
+    {
+        try
+        {
+            var next = VcmConfigImporter.ImportLayoutXml(path, scannerLayout, log, liveOs);
+            ApplyLayout(next, "Loaded VCM preset " + VcmConfigImporter.PresetName(path),
+                selectProfile: next.LiveChannels != scannerLayout.LiveChannels);
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
     private async Task ImportVcmXml()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

@@ -9,6 +9,18 @@ sealed record VcmParameterMap(int VcmId, int? ObdPid, string CatalogId, string N
 
 static class VcmConfigImporter
 {
+    private static readonly string BundledRoot = Path.Combine(AppContext.BaseDirectory, "Assets", "VCM");
+
+    public static string[] BundledPresets(string? category = null)
+    {
+        string directory = category is null ? BundledRoot : Path.Combine(BundledRoot, category);
+        return Directory.Exists(directory)
+            ? Directory.GetFiles(directory, "*.xml", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase).ToArray()
+            : [];
+    }
+
+    public static string PresetName(string path) => Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
+
     private static readonly VcmParameterMap[] ParameterMaps =
     [
         new(3, 0x0003, "FuelingMode", "Fuel System Status", "Raw", ["Fueling Mode", "Fuel System Status"]),

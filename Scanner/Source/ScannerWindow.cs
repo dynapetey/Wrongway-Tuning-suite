@@ -29,7 +29,7 @@ sealed partial class ScannerWindow : Window
     private readonly TextBox port = new() { Width = 170, Watermark = "/dev/ttyUSB0" };
     private readonly ComboBox adapterMode = new() { ItemsSource = new[] { "Serial (OBDX DVI)", "J2534 (Linux VPW)" }, SelectedIndex = 0, Width = 168 };
     private bool UsesJ2534 => adapterMode.SelectedIndex == 1;
-    private readonly ComboBox profile = new() { ItemsSource = LiveScanner.Profiles.Append(LiveScanner.Custom).ToArray(), SelectedIndex = 0, Width = 152 };
+    private readonly ComboBox profile = new() { ItemsSource = LiveScanner.ProfileChoices(), SelectedIndex = 0, Width = 220, MaxDropDownHeight = 320 };
     private readonly StackPanel channelList = new() { Spacing = 3 };
     private readonly Slider slider = new() { Minimum = 0, Maximum = 1, IsEnabled = false };
     private readonly TraceChart chart = new() { MinHeight = 170 };
@@ -127,6 +127,14 @@ sealed partial class ScannerWindow : Window
         var editTraces = Button("Edit traces", EditTraces);
         var editChannels = Button("Edit display channels", EditDisplayChannels);
         var editLive = Button("Edit live channels", EditLiveChannels);
+        var bundledVcm = new MenuItem { Header = "Bundled VCM Presets" };
+        bundledVcm.ItemsSource = VcmConfigImporter.BundledPresets().GroupBy(path => Path.GetFileName(Path.GetDirectoryName(path)))
+            .Select(group => new MenuItem
+            {
+                Header = group.Key,
+                ItemsSource = group.Select(path => DeskUi.Action(VcmConfigImporter.PresetName(path),
+                    Button(VcmConfigImporter.PresetName(path), () => ApplyBundledVcmPreset(path)))).ToArray()
+            }).ToArray();
         var menu = new Menu
         {
             ItemsSource = new[]
@@ -142,6 +150,7 @@ sealed partial class ScannerWindow : Window
                     DeskUi.Action("P59 histogram presets…", Button("P59 histogram presets", LoadHistogramPresets)),
                     DeskUi.Action("Time chart…", editTraces), DeskUi.Action("Display channels…", editChannels),
                     DeskUi.Action("Live channels…", editLive),
+                    bundledVcm,
                     DeskUi.Action("Import VCM XML…", Button("Import VCM XML", ImportVcmXml)),
                     DeskUi.Action("Save layout as…", Button("Save layout as", SaveLayout)),
                     DeskUi.Action("Load layout…", Button("Load layout", LoadLayout)),
@@ -864,8 +873,8 @@ sealed partial class ScannerWindow : Window
         {
             if (UsesJ2534)
             {
-                if (selection == LiveScanner.Custom)
-                    throw new NotSupportedException("J2534 custom GM-enhanced profiles are not available; use FuelTrims or Basics for SAE logging.");
+                if (selection == LiveScanner.Custom || selection.StartsWith(LiveScanner.VcmPrefix, StringComparison.Ordinal))
+                    throw new NotSupportedException("Use the native OBDX mode for VCM and custom GM-enhanced profiles. J2534 supports FuelTrims and Basics.");
                 await J2534Gt.Record(device, selection, path, PostStatus,
                     reading => QueueLive(next, reading), token);
             }

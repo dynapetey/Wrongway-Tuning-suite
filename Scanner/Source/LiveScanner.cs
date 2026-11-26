@@ -26,6 +26,10 @@ static class LiveScanner
     public static readonly string[] Profiles = ["WrongWayP59", "Basics", "FuelTrims"];
 
     public const string Custom = "Custom";
+    public const string VcmPrefix = "VCM: ";
+
+    public static string[] ProfileChoices() =>
+        [.. Profiles, .. VcmConfigImporter.BundledPresets("Channel Configs").Select(path => VcmPrefix + VcmConfigImporter.PresetName(path)), Custom];
     public const uint DefaultOs = 12587811;
     public const int StreamingBytes = 18;
     public const int MaximumLiveBytes = 36;
@@ -39,11 +43,21 @@ static class LiveScanner
                 parameter is RamParameter ram && ram.TryGetAddress(os, out uint address) ? address : null))
             .OrderBy(choice => choice.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
-    public static LiveChannelSetting[] ProfileSettings(string name, uint os) =>
-        new LogProfileReader(Database(), os, new ScannerLogger(_ => { })).Read(ProfilePath(name)).Columns
+    public static LiveChannelSetting[] ProfileSettings(string name, uint os)
+    {
+        if (name.StartsWith(VcmPrefix, StringComparison.Ordinal))
+        {
+            var path = VcmConfigImporter.BundledPresets("Channel Configs")
+                .FirstOrDefault(file => VcmPrefix + VcmConfigImporter.PresetName(file) == name)
+                ?? throw new InvalidDataException($"Unknown VCM profile: {name}.");
+            var channels = VcmConfigImporter.ImportChannelsXml(path, os);
+            return channels.Length > 0 ? channels : throw new InvalidDataException($"No compatible channels in {name} for PCM OS {os}.");
+        }
+        return new LogProfileReader(Database(), os, new ScannerLogger(_ => { })).Read(ProfilePath(name)).Columns
             .Where(column => column.Parameter is PcmParameter)
             .Select(column => new LiveChannelSetting(column.Parameter.Id, column.Conversion.Units, column.Parameter.Name))
             .DistinctBy(column => column.Id).ToArray();
+    }
 
     private static LogProfile CreateProfile(ParameterDatabase database, uint os, LiveChannelSetting[] settings)
     {
@@ -150,8 +164,9 @@ static class LiveScanner
                 throw new IOException("The PCM did not return its operating system ID.");
             identify(os.Value);
             var database = Database();
-            var profile = profileName == Custom
-                ? CreateProfile(database, os.Value, custom ?? [])
+            bool customProfile = profileName == Custom || profileName.StartsWith(VcmPrefix, StringComparison.Ordinal);
+            var profile = customProfile
+                ? CreateProfile(database, os.Value, profileName == Custom ? custom ?? [] : ProfileSettings(profileName, os.Value))
                 : new LogProfileReader(database, os.Value, logger).Read(ProfilePath(profileName));
             if (profile.IsEmpty)
                 throw new InvalidDataException("The selected profile contains no channels for this PCM OS.");
@@ -159,9 +174,9 @@ static class LiveScanner
             using var can = new CanLogger(database, logger);
             await can.SetPort(null);
             var pcmBytes = profile.Columns.Sum(column => column.Parameter is PcmParameter pcm ? pcm.ByteCount : 0);
-            if (profileName == Custom && pcmBytes > StreamingBytes && os.Value is not (12587603 or 12587811))
+            if (customProfile && pcmBytes > StreamingBytes && os.Value is not (12587603 or 12587811))
                 throw new InvalidDataException($"Expanded polling has not been verified for PCM OS {os.Value}.");
-            bool polled = profileName == Custom && os.Value is 12587603 or 12587811 && (pcmBytes > StreamingBytes
+            bool polled = customProfile && os.Value is 12587603 or 12587811 && (pcmBytes > StreamingBytes
                 || profile.Columns.Any(c => c.Parameter is PidParameter pid && pid.PID is >= 6 and <= 9));
             var scanner = polled
                 ? new ExpandedLiveLogger(vehicle, can, os.Value, profile.Columns, logger, token)
