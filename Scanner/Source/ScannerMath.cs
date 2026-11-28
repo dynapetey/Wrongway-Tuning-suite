@@ -236,7 +236,7 @@ sealed record MathSetting(string Name, string Unit, string Formula, bool Enabled
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8ac3")),
         new("MAF PE Error %", "%", "(([2320.71]+([2320.71]*([50119.238]-[50118.238])/[50118.238]))-[50040.71])/[50040.71]*100",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8ac4")),
-        new("PE FOR AFR", "%", "(([2320.71]+([2320.71]*(([6001]-[50121])/[50121])))-[16.71])/[16.71]*100",
+        new("PE FOR AFR", "%", "(([2320.71]+([2320.71]*(([50120]-[50121])/[50121])))-[16.71])/[16.71]*100",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8ac5")),
         new("VVE FOR CL", "%", "(([2320.71]+([2320.71]*([50116.156]+[50114.156])/100))-[2311.71])/[2311.71]*100",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8ac6")),
@@ -248,9 +248,9 @@ sealed record MathSetting(string Name, string Unit, string Formula, bool Enabled
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8ac9")),
         new("PE Steady Filter", "flag", "[2517.161.avg(1500)]=0 and [2517.161.avg(-200)]=0 and (abs([50090.156.slope(250)])+abs([50090.156.slope(-250)]))<2 and [50118.238.avg(250)] < 1.00",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8aca")),
-        new("Boost Pressure", "psi", "max(0, ([50030.91] - 101.325) * 0.1450377)",
+        new("Boost Pressure", "psi", "max(0, ([50030.56] - 101.325) * 0.1450377)",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8acb")),
-        new("Estimated Wheel HP", "HP", "[50040.73] * 1.08",
+        new("Estimated Wheel HP", "HP", "[50040.71] * 1.08",
             Enabled: false, Id: new Guid("4a912d15-8366-4dea-a179-2af70c8c8acc"))
     ];
 

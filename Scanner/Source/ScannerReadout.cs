@@ -40,7 +40,7 @@ sealed class ScannerReadout : IDisposable
                 }
             }
             listener.Bind(endpoint);
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            if (OperatingSystem.IsLinux()) { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
             listener.Listen(4);
             _ = Serve(readStatus, stop.Token);
         }

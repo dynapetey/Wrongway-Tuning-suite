@@ -46,7 +46,7 @@ namespace WrongWayScanner.Telemetry.J2534
         }
     }
 
-    public interface IJ2534Transport
+    public interface IJ2534Transport : IDisposable
     {
         void WriteMessage(byte[] data);
         byte[]? ReadMessage(int timeoutMs);
