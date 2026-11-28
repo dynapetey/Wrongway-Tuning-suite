@@ -99,7 +99,7 @@
       storageType="uint8"
       bitMapped="False">
     <Conversion units="kph" expression="x" format="0.00" />
-    <Conversion units="mph" expression="(x*0.60934)" format="0.00" />
+    <Conversion units="mph" expression="(x/1.609344)" format="0.00" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -168,9 +168,9 @@
       pid="0014"
       name="O2 Left Upstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="(x/256)*5" format="0" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -178,9 +178,9 @@
       pid="0015"
       name="O2 Left Downstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="(x/256)*5" format="0" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -208,9 +208,9 @@
       pid="0018"
       name="O2 Right Upstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="(x/256)*5" format="0" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -218,9 +218,9 @@
       pid="0019"
       name="O2 Right Downstream"
       description=""
-      storageType="int16"
+      storageType="uint16"
       bitMapped="False">
-    <Conversion units="Volts" expression="x" format="0" />
+    <Conversion units="mV" expression="(x/256)*5" format="0" />
     <OS id="all" />
   </Parameter>
   <Parameter
@@ -1816,7 +1816,7 @@
   <Parameter
       id="HO2SHeaterBn2Sen2"
       pid="1485"
-      name="HO2S Heater Bn 1 Sen 2"
+      name="HO2S Heater Bn 2 Sen 2"
       description=""
       storageType="uint16"
       bitMapped="False">
